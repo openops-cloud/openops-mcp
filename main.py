@@ -8,7 +8,6 @@ import sys
 import logging
 from logging_config import setup_logging
 
-# Initialize logging
 logger = setup_logging()
 
 def get_auth_headers():
@@ -41,15 +40,12 @@ def get_base_url():
     return base_url
 
 def main():
-    # Load environment variables
     load_dotenv()
 
-    # Initialize required components
     auth_headers = get_auth_headers()
     openapi_spec = load_openapi_schema()
     base_url = get_base_url()
 
-    # Setup HTTP client
     client = httpx.AsyncClient(
         base_url=base_url,
         headers=auth_headers,
