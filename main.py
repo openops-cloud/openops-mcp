@@ -49,8 +49,7 @@ def main():
     client = httpx.AsyncClient(
         base_url=base_url,
         headers=auth_headers,
-        timeout=30.0,
-        event_hooks={"request": [log_request]}
+        timeout=30.0
     )
 
     try:
