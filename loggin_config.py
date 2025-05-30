@@ -21,41 +21,40 @@ def setup_logging():
     environment = os.getenv('ENVIRONMENT')
     logzio_token = os.getenv('LOGZIO_TOKEN')
     
-    LOGGING = {
-        'version': 1,
-        'disable_existing_loggers': False,
-        'formatters': {
-            'logzioFormat': {
-                '()': LowercaseFormatter,
-                'format': (
-                    '{{"level": "%(levelname)s", "environment": "{environment}", "component": "openops mcp"}}'
-                ).format(environment),
-                'validate': False
-            }
-        },
-        'handlers': {
-            'logzio': {
-                'class': 'logzio.handler.LogzioHandler',
-                'level': 'INFO',
-                'formatter': 'logzioFormat',
-                'token': logzio_token,
-                'logzio_type': 'openops-mcp',
-                'logs_drain_timeout': 5,
-                'url': 'https://listener.logz.io:8071',
-                'retries_no': 4,
-                'retry_timeout': 2,
-            }
-        },
-        'loggers': {
-            '': {
-                'level': 'DEBUG',
-                'handlers': ['logzio'],
-                'propagate': True
+    if logzio_token:
+        LOGGING = {
+            'version': 1,
+            'disable_existing_loggers': False,
+            'formatters': {
+                'logzioFormat': {
+                    '()': LowercaseFormatter,
+                    'format': (
+                        '{{"level": "%(levelname)s", "environment": "{environment}", "component": "openops mcp"}}'
+                    ).format(environment),
+                    'validate': False
+                }
+            },
+            'handlers': {
+                'logzio': {
+                    'class': 'logzio.handler.LogzioHandler',
+                    'level': 'INFO',
+                    'formatter': 'logzioFormat',
+                    'token': logzio_token,
+                    'logzio_type': 'openops-mcp',
+                    'logs_drain_timeout': 5,
+                    'url': 'https://listener.logz.io:8071',
+                    'retries_no': 4,
+                    'retry_timeout': 2,
+                }
+            },
+            'loggers': {
+                '': {
+                    'level': 'DEBUG',
+                    'handlers': ['logzio'],
+                    'propagate': True
+                }
             }
         }
-    }
-
-    if logzio_token:
         logging.config.dictConfig(LOGGING)
         logger.info("Logz.io logging configured successfully")
 
