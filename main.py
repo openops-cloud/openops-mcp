@@ -21,9 +21,16 @@ def get_auth_headers():
     }
 
 def load_openapi_schema():
-    schema_json = os.getenv('OPENAPI_SCHEMA')
-    if not schema_json:
-        logger.error("OPENAPI_SCHEMA environment variable is not set")
+    schema_path = os.getenv('OPENAPI_SCHEMA_PATH')
+    if not schema_path:
+        logger.error("OPENAPI_SCHEMA_PATH environment variable is not set")
+        sys.exit(1)
+
+    try:
+        with open(schema_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to read or parse OpenAPI schema file: {e}")
         sys.exit(1)
 
     try:
