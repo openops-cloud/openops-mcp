@@ -16,13 +16,13 @@ def get_auth_headers():
         logger.error("AUTH_TOKEN environment variable is not set")
         sys.exit(1)
 
-    logger.debug(f"Auth token found: {auth_token[:5]}...")
+    logger.debug(f"[OPENOPS PYTHON] Auth token found: {auth_token[:5]}...")
     return {
         'Authorization': f'Bearer {auth_token}',
     }
 
 def load_openapi_schema():
-    schema_path = os.getenv('OPENAPI_SCHEMA_PATH')
+    schema_path = os.getenv('[OPENOPS PYTHON] OPENAPI_SCHEMA_PATH')
     if not schema_path:
         logger.error("OPENAPI_SCHEMA_PATH environment variable is not set")
         sys.exit(1)
@@ -52,14 +52,14 @@ def get_base_url():
     return base_url
 
 def main():
-    logger.info("Starting OpenOps MCP client initialization")
+    logger.info("[OPENOPS PYTHON] Starting OpenOps MCP client initialization")
     load_dotenv()
-    logger.debug("Environment variables loaded")
+    logger.debug("[OPENOPS PYTHON] Environment variables loaded")
 
     auth_headers = get_auth_headers()
-    logger.debug("Auth headers configured")
+    logger.debug("[OPENOPS PYTHON] Auth headers configured")
 
-    openapi_spec = load_openapi_schema()
+   # openapi_spec = load_openapi_schema()
     logger.debug("OpenAPI schema loaded successfully")
 
     base_url = get_base_url()
@@ -76,16 +76,6 @@ def main():
     try:
         logger.info("Initializing FastMCP client")
         logger.debug(f"OpenAPI spec keys: {list(openapi_spec.keys())}")
-        mcp = FastMCP.from_openapi(
-            openapi_spec=openapi_spec,
-            client=client,
-            name="OpenOps API Server",
-            all_routes_as_tools=True,
-            default_headers=auth_headers,
-        )
-        logger.info("FastMCP client initialized successfully")
-        mcp.run()
-        return mcp
     except Exception as e:
         logger.error(f"Failed to create OpenOps MCP client: {str(e)}", exc_info=True)
         logger.error(f"Error type: {type(e).__name__}")
