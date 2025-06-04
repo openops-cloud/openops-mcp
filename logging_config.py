@@ -18,10 +18,10 @@ def setup_logging():
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
     
-    environment = os.getenv('ENVIRONMENT')
-    logzio_token = os.getenv('LOGZIO_TOKEN')
+    ENVIRONMENT = os.getenv('ENVIRONMENT', 'local')
+    LOGZIO_TOKEN = os.getenv('LOGZIO_TOKEN')
     
-    if logzio_token:
+    if LOGZIO_TOKEN:
         LOGGING = {
             'version': 1,
             'disable_existing_loggers': False,
@@ -30,7 +30,7 @@ def setup_logging():
                     '()': LowercaseFormatter,
                     'format': (
                         '{{"level": "%(levelname)s", "environment": "{environment}", "component": "openops mcp"}}'
-                    ).format(environment),
+                    ).format(environment=ENVIRONMENT),
                     'validate': False
                 }
             },
@@ -39,7 +39,7 @@ def setup_logging():
                     'class': 'logzio.handler.LogzioHandler',
                     'level': 'INFO',
                     'formatter': 'logzioFormat',
-                    'token': logzio_token,
+                    'token': LOGZIO_TOKEN,
                     'logzio_type': 'openops-mcp',
                     'logs_drain_timeout': 5,
                     'url': 'https://listener.logz.io:8071',
