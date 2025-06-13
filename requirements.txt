@@ -8,5 +8,5 @@ httpx>=0.28.1
 openai>=1.0.0
 setuptools>=65.5.1
 wheel>=0.38.4
-fastmcp>=0.1.0
+fastmcp==2.7.1
 logzio-python-handler>=4.1.4
