@@ -18,7 +18,7 @@ pip install -r requirements.txt
 3. Create a `.env` file with the following variables:
 ```bash
 AUTH_TOKEN=your_auth_token
-OPENAPI_SCHEMA=your_openapi_schema
+OPENAPI_SCHEMA_URL=your_openapi_schema_url
 API_BASE_URL=your_api_base_url
 LOGZIO_TOKEN=your_logzio_token  # Optional: for Logz.io logging
 ```
@@ -51,7 +51,7 @@ To enable Logz.io logging:
 ## Environment Variables
 
 - `AUTH_TOKEN`: Authentication token for API requests
-- `OPENAPI_SCHEMA`: OpenAPI schema in JSON format that defines the API structure
+- `OPENAPI_SCHEMA_URL`: URL endpoint where the OpenAPI schema can be fetched
 - `API_BASE_URL`: Base URL for the API endpoints
 - `LOGZIO_TOKEN`: (Optional) Logz.io token for remote logging
 - `ENVIRONMENT`: (Optional) Used for Logz.io

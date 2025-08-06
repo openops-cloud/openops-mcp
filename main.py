@@ -5,8 +5,8 @@ import json
 import os
 from dotenv import load_dotenv
 import sys
-import logging
 from logging_config import setup_logging
+from fastmcp.server.openapi import RouteMap, MCPType
 
 logger = setup_logging()
 
@@ -21,23 +21,30 @@ def get_auth_headers():
     }
 
 def load_openapi_schema():
-    schema_path = os.getenv('OPENAPI_SCHEMA_PATH')
-    if not schema_path:
-        logger.error("OPENAPI_SCHEMA_PATH environment variable is not set")
-        sys.exit(1)
+    schema_url = os.getenv('OPENAPI_SCHEMA_URL', 'http://localhost:3000/v1/openapi/json')
 
     try:
-        with open(schema_path, 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to read or parse OpenAPI schema file: {e}")
+        response = requests.get(schema_url)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to fetch OpenAPI schema from {schema_url}: {e}")
         sys.exit(1)
-
-    try:
-        return json.loads(schema_json)
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse OpenAPI schema: {str(e)}")
+        logger.error(f"Failed to parse OpenAPI schema from {schema_url}: {e}")
         sys.exit(1)
+
+def filter_v2_routes(openapi_spec: dict) -> dict:
+    if "paths" not in openapi_spec:
+        raise ValueError("Invalid OpenAPI spec: missing 'paths' field")
+
+    v2_paths = {path: data for path, data in openapi_spec["paths"].items() if path.startswith("/v2")}
+
+    # Create a shallow copy of the spec and replace paths
+    filtered_spec = openapi_spec.copy()
+    filtered_spec["paths"] = v2_paths
+
+    return filtered_spec
 
 def get_base_url():
     base_url = os.getenv('API_BASE_URL')
@@ -59,12 +66,22 @@ def main():
         timeout=30.0
     )
 
+    route_maps = [
+        RouteMap(
+            methods="*",
+            pattern=r"^/v2/.*",
+            mcp_type=MCPType.TOOL
+        )
+    ]
+
     try:
         mcp = FastMCP.from_openapi(
             openapi_spec=openapi_spec,
             client=client,
             name="OpenOps API Server",
-            all_routes_as_tools=True,
+            # all_routes_as_tools=True,
+            all_routes_as_tools=False,
+            route_maps=route_maps,
             default_headers=auth_headers,
         )
         mcp.run()
