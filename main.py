@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import sys
 from logging_config import setup_logging
 from fastmcp.server.openapi import RouteMap, MCPType
+import requests
 
 logger = setup_logging()
 
