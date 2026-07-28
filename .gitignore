@@ -6,3 +6,14 @@ __pycache__
 
 .env
 .vscode
+# macOS
+.DS_Store
+
+# build artefacts
+build/
+dist/
+*.spec
+*.egg-info/
+
+# editors
+.idea/
