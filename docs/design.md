@@ -113,7 +113,7 @@ no round trip per request:
 JWTVerifier(
     jwks_uri=f"{issuer}/v1/oauth/jwks.json",
     issuer=issuer,
-    audience=resource_url,          # this server's canonical URI
+    audience=resource_url,  # this server's canonical URI
     required_scopes=["mcp"],
 )
 ```
