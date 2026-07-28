@@ -49,3 +49,8 @@ warn_unreachable = true
 [[tool.mypy.overrides]]
 module = "logzio.*"
 ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "uvicorn>=0.51.0",
+]

@@ -914,6 +914,11 @@ dev = [
     { name = "types-pyyaml" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "uvicorn" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "fastmcp", specifier = "==3.4.5" },
@@ -928,6 +933,9 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "uvicorn", specifier = ">=0.51.0" }]
 
 [[package]]
 name = "opentelemetry-api"

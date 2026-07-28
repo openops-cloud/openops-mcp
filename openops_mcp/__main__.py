@@ -47,7 +47,14 @@ def build(settings: Settings) -> FastMCP:
             client=static.build_api_client(settings.common.api_url, settings.auth_token),
         )
 
-    raise ConfigError("the http transport is not available in this build")
+    from .auth import oauth
+
+    return build_server(
+        spec=pruned,
+        routes=routes,
+        client=oauth.build_api_client(settings),
+        auth=oauth.build_auth_provider(settings),
+    )
 
 
 def main() -> None:
