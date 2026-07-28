@@ -4,24 +4,22 @@ This is a FastMCP server implementation for OpenOps that provides a managed cont
 
 ## Setup
 
-1. Create a virtual environment:
+1. Setup your `.env`:
+```
+OPS_OPENOPS_MCP_SERVER_PATH= # your local path to openops-internal/mcp-server
+```
+
+2. Create a virtual environment:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
 ```
 
-2. Install dependencies:
+3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Create a `.env` file with the following variables:
-```bash
-AUTH_TOKEN=your_auth_token
-OPENAPI_SCHEMA=your_openapi_schema
-API_BASE_URL=your_api_base_url
-LOGZIO_TOKEN=your_logzio_token  # Optional: for Logz.io logging
-```
 
 ## Key Dependencies
 
@@ -31,9 +29,19 @@ LOGZIO_TOKEN=your_logzio_token  # Optional: for Logz.io logging
 - `logzio-python-handler`: For Logz.io logging integration
 
 ## Running the Server
+*Not needed for local development*
 
 ```bash
 python main.py
+```
+
+## Using it in other MCP clients
+Make sure the following env variables are set:
+```bash
+AUTH_TOKEN=your_auth_token
+OPENAPI_SCHEMA_URL=your_openapi_schema_url
+API_BASE_URL=your_api_base_url
+LOGZIO_TOKEN=your_logzio_token  # Optional: for Logz.io logging
 ```
 
 ## Logging
@@ -51,7 +59,7 @@ To enable Logz.io logging:
 ## Environment Variables
 
 - `AUTH_TOKEN`: Authentication token for API requests
-- `OPENAPI_SCHEMA`: OpenAPI schema in JSON format that defines the API structure
+- `OPENAPI_SCHEMA_URL`: URL endpoint where the OpenAPI schema can be fetched
 - `API_BASE_URL`: Base URL for the API endpoints
 - `LOGZIO_TOKEN`: (Optional) Logz.io token for remote logging
 - `ENVIRONMENT`: (Optional) Used for Logz.io
