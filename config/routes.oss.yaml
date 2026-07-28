@@ -1,0 +1,51 @@
+# Operations exposed to the built-in AI chat on a community (OSS) deployment.
+#
+# This is the set the API itself intends to expose, taken from INCLUDED_PATHS in
+# packages/server/api/src/app/ai/mcp/openops-tools.ts. Every entry is present in the
+# community API's OpenAPI document.
+#
+# Startup fails if an entry here is not in the document, so a path that does not exist
+# is reported rather than silently producing no tool.
+
+routes:
+  # Flows
+  - path: /v1/flows/
+    methods: [get]
+  - path: /v1/flows/count
+    methods: [get]
+  - path: /v1/flows/{id}
+    methods: [get]
+  - path: /v1/flow-versions/
+    methods: [get]
+
+  # Runs
+  - path: /v1/flow-runs/
+    methods: [get]
+  - path: /v1/flow-runs/{id}
+    methods: [get]
+  - path: /v1/flow-runs/{id}/retry
+    methods: [post]
+
+  # Blocks
+  - path: /v1/blocks/
+    methods: [get]
+  - path: /v1/blocks/categories
+    methods: [get]
+  - path: /v1/blocks/options
+    methods: [post]
+  - path: /v1/blocks/{name}
+    methods: [get]
+  - path: /v1/blocks/{scope}/{name}
+    methods: [get]
+
+  # Connections
+  - path: /v1/app-connections/
+    methods: [get, patch]
+  - path: /v1/app-connections/{id}
+    methods: [get]
+  - path: /v1/app-connections/metadata
+    methods: [get]
+
+  # Files
+  - path: /v1/files/{fileId}
+    methods: [get]

@@ -6,10 +6,13 @@ variable at fault instead of surfacing later as a confusing request failure.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 Transport = Literal["stdio", "http"]
 
@@ -105,6 +108,12 @@ def _read_transport(env: dict[str, str]) -> Transport:
 
 
 def _load_common(env: dict[str, str]) -> CommonSettings:
+    # The API has historically spawned this server with API_BASE_URL and
+    # OPENAPI_SCHEMA_URL. Those are accepted as fallbacks so the two sides can be
+    # rolled out independently; they are pure renames with no change in meaning.
+    _accept_legacy(env, "OPENOPS_API_URL", "API_BASE_URL")
+    _accept_legacy(env, "OPENOPS_API_OPENAPI_URL", "OPENAPI_SCHEMA_URL")
+
     api_url = _require_url("OPENOPS_API_URL", env)
     openapi_url = env.get("OPENOPS_API_OPENAPI_URL", "").strip()
 
@@ -113,6 +122,12 @@ def _load_common(env: dict[str, str]) -> CommonSettings:
         openapi_url=openapi_url.rstrip("/") if openapi_url else f"{api_url}{DEFAULT_OPENAPI_PATH}",
         routes_file=_require("OPENOPS_MCP_ROUTES", env),
     )
+
+
+def _accept_legacy(env: dict[str, str], current: str, legacy: str) -> None:
+    if not env.get(current, "").strip() and env.get(legacy, "").strip():
+        logger.warning("%s is deprecated; set %s instead", legacy, current)
+        env[current] = env[legacy]
 
 
 def load_settings(env: dict[str, str] | None = None) -> Settings:

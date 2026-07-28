@@ -1,0 +1,55 @@
+# Operations exposed on an enterprise deployment.
+#
+# Everything in routes.oss.yaml, plus the /mcp/* surface that is registered only by
+# enterprise-api (see its blocks, runs and flows modules). Those paths are absent from
+# a community API's OpenAPI document, so this file will refuse to start against one —
+# which is the intended signal, not a failure to work around.
+
+routes:
+  # --- enterprise-only: flow authoring ---
+  - path: /mcp/flows/
+    methods: [get, post]
+  - path: /mcp/flows/{id}/version
+    methods: [get]
+  - path: /mcp/flows/{flowId}/add-step
+    methods: [post]
+  - path: /mcp/flows/{flowId}/update-step
+    methods: [put]
+  - path: /mcp/flows/{flowId}/delete-step/{stepId}
+    methods: [delete]
+  - path: /mcp/flows/{flowId}/update-trigger
+    methods: [put]
+  - path: /mcp/flows/versions/{flowVersionId}/execute-step/{stepId}
+    methods: [post]
+  - path: /mcp/flows/{flowVersionId}/steps/{stepId}/test-output
+    methods: [get]
+
+  # --- enterprise-only: runs ---
+  - path: /mcp/runs/{id}
+    methods: [get]
+  - path: /mcp/runs/{flowVersionId}/start-test-run
+    methods: [post]
+
+  # --- enterprise-only: blocks ---
+  - path: /mcp/blocks/
+    methods: [get]
+  - path: /mcp/blocks/{packageScope}/{packageName}/actions
+    methods: [get]
+  - path: /mcp/blocks/{packageScope}/{packageName}/actions/{name}
+    methods: [get]
+  - path: /mcp/blocks/{packageScope}/{packageName}/triggers
+    methods: [get]
+  - path: /mcp/blocks/{packageScope}/{packageName}/triggers/{name}
+    methods: [get]
+
+  # --- also available on community deployments ---
+  - path: /v1/flow-runs/
+    methods: [get]
+  - path: /v1/flow-runs/{id}/retry
+    methods: [post]
+  - path: /v1/app-connections/
+    methods: [get, patch]
+  - path: /v1/app-connections/{id}
+    methods: [get]
+  - path: /v1/app-connections/metadata
+    methods: [get]
