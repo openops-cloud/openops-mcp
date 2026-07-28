@@ -9,6 +9,7 @@ never does.
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlparse
 
 import httpx
 from fastmcp.server.auth import AuthProvider, RemoteAuthProvider
@@ -41,10 +42,16 @@ def build_auth_provider(settings: HttpSettings) -> AuthProvider:
         required_scopes=[REQUIRED_SCOPE],
     )
 
+    # `base_url` is this server's origin, not the resource identifier: FastMCP appends
+    # the transport's mount path to derive the resource and the metadata location.
+    # Passing the full resource URI here would double that path segment, and the
+    # challenge would point clients at metadata that does not exist.
+    parsed = urlparse(settings.resource_url)
+
     return RemoteAuthProvider(
         token_verifier=verifier,
         authorization_servers=[settings.issuer],  # type: ignore[list-item]
-        base_url=settings.resource_url,
+        base_url=f"{parsed.scheme}://{parsed.netloc}",
         resource_name="OpenOps",
     )
 

@@ -50,6 +50,12 @@ def build_server(
         mcp_names=build_mcp_names(spec, routes),
         mcp_component_fn=apply_overrides if descriptions else None,
         tags={"openops"},
+        # The API's response schemas are generated and do not always mark nullable
+        # fields, so validating against them turns a healthy 200 into a tool error —
+        # `None is not of type 'string'` for a field the API legitimately omits. The
+        # consumer is a model, which handles a missing field far better than it handles
+        # losing the whole response.
+        validate_output=False,
         **settings,
     )
 
