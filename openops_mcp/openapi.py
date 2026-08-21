@@ -1,33 +1,35 @@
-"""Turning the API's OpenAPI document into exactly the allowed set of tools."""
+"""Reading the API's MCP document and turning it into a tool surface.
+
+The document arrives already filtered to one profile, so this module neither chooses nor
+prunes operations — the API decides, and the two sides cannot disagree about the list.
+"""
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import httpx
 from fastmcp.server.providers.openapi import MCPType, RouteMap
 
 from .config import ConfigError
-from .routes import HttpMethod, RouteSpec
-
-# FastMCP matches on upper-case verbs; the allow-list and OpenAPI both use lower-case.
-_ROUTE_MAP_METHOD: dict[HttpMethod, Any] = {
-    "get": "GET",
-    "post": "POST",
-    "put": "PUT",
-    "patch": "PATCH",
-    "delete": "DELETE",
-    "head": "HEAD",
-    "options": "OPTIONS",
-}
 
 logger = logging.getLogger(__name__)
 
 
+def _validate(spec: Any, source: str) -> dict[str, Any]:
+    if not isinstance(spec, dict) or "paths" not in spec:
+        raise ConfigError(f"{source} returned no OpenAPI 'paths'")
+
+    logger.info("Loaded %d paths from %s", len(spec["paths"]), source)
+
+    return spec
+
+
 async def fetch_spec(url: str, client: httpx.AsyncClient) -> dict[str, Any]:
-    """Read the OpenAPI document. The endpoint is public, so no credential is needed."""
+    """Read the document over HTTP. The endpoint is public, so no credential is needed."""
     try:
         response = await client.get(url)
         response.raise_for_status()
@@ -39,115 +41,35 @@ async def fetch_spec(url: str, client: httpx.AsyncClient) -> dict[str, Any]:
     except ValueError as exc:
         raise ConfigError(f"{url} did not return JSON: {exc}") from exc
 
-    if not isinstance(spec, dict) or "paths" not in spec:
-        raise ConfigError(f"{url} returned no OpenAPI 'paths'")
-
-    return spec
+    return _validate(spec, url)
 
 
-def prune_spec(
-    spec: dict[str, Any], routes: list[RouteSpec]
-) -> tuple[dict[str, Any], list[RouteSpec]]:
-    """Reduce the document to the allowed operations.
+def read_spec(path: str) -> dict[str, Any]:
+    """Read a document the API wrote for this process, rather than fetching it.
 
-    Returns the pruned document and the entries that matched nothing, so a mistyped
-    path is reported rather than silently producing no tool.
+    Used on stdio, where a process is spawned per chat request: reading the file the API
+    just wrote costs nothing, while an HTTP round trip per spawn would.
     """
-    allowed = {route.path: route.methods for route in routes}
-    spec_paths: dict[str, Any] = spec.get("paths") or {}
+    file_path = Path(path)
 
-    kept: dict[str, Any] = {}
-    matched: set[tuple[str, str]] = set()
+    try:
+        text = file_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"could not read the OpenAPI document at {file_path}: {exc}") from exc
 
-    for path, operations in spec_paths.items():
-        if path not in allowed or not isinstance(operations, dict):
-            continue
+    try:
+        spec = json.loads(text)
+    except ValueError as exc:
+        raise ConfigError(f"{file_path} is not valid JSON: {exc}") from exc
 
-        selected = {
-            method: operation
-            for method, operation in operations.items()
-            if method.lower() in allowed[path]
-        }
-
-        if selected:
-            kept[path] = selected
-            matched.update((path, method.lower()) for method in selected)
-
-    unmatched = [
-        route
-        for route in routes
-        if not any((route.path, method) in matched for method in route.methods)
-    ]
-
-    pruned = {**spec, "paths": kept}
-    _log_unlisted(spec_paths, allowed)
-
-    return pruned, unmatched
+    return _validate(spec, str(file_path))
 
 
-def assert_all_matched(unmatched: list[RouteSpec], source: str) -> None:
-    """Refuse to start when the allow-list names operations the API does not expose."""
-    if not unmatched:
-        return
+def build_route_maps() -> list[RouteMap]:
+    """Every operation in the document becomes a tool.
 
-    listed = ", ".join(
-        f"{'|'.join(sorted(m.upper() for m in route.methods))} {route.path}" for route in unmatched
-    )
-    raise ConfigError(
-        f"{source} lists operations the API does not expose: {listed}. "
-        "Check the paths and methods against the OpenAPI document."
-    )
-
-
-def build_route_maps(routes: list[RouteSpec]) -> list[RouteMap]:
-    """Map allowed operations to tools, and exclude everything else.
-
-    The trailing exclude matters: FastMCP turns every remaining route into a tool by
-    default, so without it a pruning mistake would quietly expose an operation.
+    The document is the allow-list, so there is nothing left to exclude here. Stated
+    explicitly rather than relying on FastMCP's default, so the intent survives a version
+    bump.
     """
-    maps = [
-        RouteMap(
-            methods=sorted(_ROUTE_MAP_METHOD[method] for method in route.methods),
-            pattern=f"^{_escape(route.path)}$",
-            mcp_type=MCPType.TOOL,
-        )
-        for route in routes
-    ]
-    maps.append(RouteMap(methods="*", pattern=r".*", mcp_type=MCPType.EXCLUDE))
-
-    return maps
-
-
-def build_mcp_names(spec: dict[str, Any], routes: list[RouteSpec]) -> dict[str, str]:
-    """Map operationId to the tool name requested in the allow-list."""
-    overrides = {route.path: route.name for route in routes if route.name}
-    if not overrides:
-        return {}
-
-    names: dict[str, str] = {}
-    for path, operations in (spec.get("paths") or {}).items():
-        if path not in overrides or not isinstance(operations, dict):
-            continue
-        for operation in operations.values():
-            operation_id = (operation or {}).get("operationId")
-            if operation_id:
-                names[operation_id] = overrides[path]
-
-    return names
-
-
-def _escape(path: str) -> str:
-    """Escape a path for use in a regex, leaving OpenAPI `{param}` segments intact."""
-    import re
-
-    return re.escape(path).replace(r"\{", "{").replace(r"\}", "}")
-
-
-def _log_unlisted(spec_paths: Mapping[str, Any], allowed: Mapping[str, frozenset[Any]]) -> None:
-    unlisted = sorted(set(spec_paths) - set(allowed))
-    if unlisted:
-        logger.debug(
-            "%d API operations are not in the allow-list and will not become tools: %s",
-            len(unlisted),
-            ", ".join(unlisted),
-        )
+    return [RouteMap(methods="*", pattern=r".*", mcp_type=MCPType.TOOL)]
