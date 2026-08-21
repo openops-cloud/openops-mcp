@@ -13,8 +13,7 @@ from fastmcp import FastMCP
 from .auth import static
 from .config import ConfigError, HttpSettings, Settings, StdioSettings, load_settings
 from .logging_config import setup_logging
-from .openapi import assert_all_matched, fetch_spec, prune_spec
-from .routes import load_routes
+from .openapi import fetch_spec, read_spec
 from .server import build_server
 
 logger = setup_logging()
@@ -22,7 +21,7 @@ logger = setup_logging()
 SPEC_FETCH_TIMEOUT = 15.0
 
 
-async def _load_spec(settings: Settings) -> dict[str, Any]:
+async def _fetch_spec(settings: Settings) -> dict[str, Any]:
     """Read the OpenAPI document with its own short-lived client.
 
     Separate from the client the tools use: this runs before the server's event loop
@@ -32,26 +31,28 @@ async def _load_spec(settings: Settings) -> dict[str, Any]:
         return await fetch_spec(settings.common.openapi_url, client)
 
 
+def _load_spec(settings: Settings) -> dict[str, Any]:
+    """The document the API filtered for this profile, from a file or over HTTP."""
+    if settings.common.openapi_path is not None:
+        return read_spec(settings.common.openapi_path)
+
+    return asyncio.run(_fetch_spec(settings))
+
+
 def build(settings: Settings) -> FastMCP:
     """Build the server for the configured transport."""
-    routes = load_routes(settings.common.routes_file)
-    spec = asyncio.run(_load_spec(settings))
-
-    pruned, unmatched = prune_spec(spec, routes)
-    assert_all_matched(unmatched, settings.common.routes_file)
+    spec = _load_spec(settings)
 
     if isinstance(settings, StdioSettings):
         return build_server(
-            spec=pruned,
-            routes=routes,
+            spec=spec,
             client=static.build_api_client(settings.common.api_url, settings.auth_token),
         )
 
     from .auth import oauth
 
     return build_server(
-        spec=pruned,
-        routes=routes,
+        spec=spec,
         client=oauth.build_api_client(settings),
         auth=oauth.build_auth_provider(settings),
     )

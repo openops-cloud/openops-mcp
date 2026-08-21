@@ -68,7 +68,7 @@ def build_api_client(settings: HttpSettings) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url=settings.common.api_url,
         timeout=API_TIMEOUT_SECONDS,
-        event_hooks={"request": [_authorize(exchanger)]},
+        transport=_AuthorizingTransport(exchanger=exchanger, inner=httpx.AsyncHTTPTransport()),
     )
 
 
@@ -98,17 +98,68 @@ def _caller_token() -> str:
     return token
 
 
-def _authorize(exchanger: TokenExchanger):  # type: ignore[no-untyped-def]
-    async def hook(request: httpx.Request) -> None:
+class _AuthorizingTransport(httpx.AsyncBaseTransport):
+    """Authorizes every API request as its caller, and recovers from a stale token.
+
+    A transport rather than a request event hook because a hook cannot retry, and one
+    retry is what turns a revoked connection into a message worth reading.
+    """
+
+    def __init__(self, *, exchanger: TokenExchanger, inner: httpx.AsyncBaseTransport) -> None:
+        self._exchanger = exchanger
+        self._inner = inner
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         # Runs inside the tool call, so this resolves to the request being served rather
         # than whichever request opened the session.
         caller_token = _caller_token()
 
+        response = await self._send(request, caller_token)
+        if response.status_code != httpx.codes.UNAUTHORIZED:
+            return response
+
+        # The API rejected the token we hold, so it is worthless: drop it whether or not
+        # this request can be retried, and never present it again.
+        self._exchanger.evict(caller_token)
+
+        if not _is_replayable(request):
+            return response
+
+        await response.aclose()
+        logger.info("The API refused the exchanged token; exchanging again")
+
+        # A second attempt goes back to the authorization server, which is the only place
+        # that can say *why* — a revoked grant raises ExchangeError with the real reason
+        # instead of handing the model an unexplained 401.
+        retried = await self._send(request, caller_token)
+
+        if retried.status_code == httpx.codes.UNAUTHORIZED:
+            # A fresh token was refused as well, so it is worth no more than the one it
+            # replaced. Keeping it would mean opening the next call with a credential the
+            # API has already rejected.
+            self._exchanger.evict(caller_token)
+
+        return retried
+
+    async def _send(self, request: httpx.Request, caller_token: str) -> httpx.Response:
         # Fail closed. Letting the request continue unauthorized would surface as a
         # confusing 401 from the API and hide the real cause.
-        api_token = await exchanger.exchange(caller_token)
+        api_token = await self._exchanger.exchange(caller_token)
         request.headers["Authorization"] = f"Bearer {api_token}"
 
         logger.debug("Authorized %s %s for the calling user", request.method, request.url.path)
 
-    return hook
+        return await self._inner.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+        await self._exchanger.aclose()
+
+
+def _is_replayable(request: httpx.Request) -> bool:
+    """Only a request whose body is already in memory can be sent twice."""
+    try:
+        _ = request.content
+    except httpx.RequestNotRead:
+        return False
+    return True

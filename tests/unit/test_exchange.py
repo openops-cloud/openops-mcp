@@ -1,3 +1,4 @@
+import asyncio
 import base64
 
 import httpx
@@ -5,6 +6,9 @@ import pytest
 
 from openops_mcp.auth.exchange import (
     ACCESS_TOKEN_TYPE,
+    CACHE_SWEEP_THRESHOLD,
+    EXPIRY_MARGIN_SECONDS,
+    MAX_CACHE_SECONDS,
     TOKEN_EXCHANGE_GRANT,
     ExchangeError,
     TokenExchanger,
@@ -160,3 +164,165 @@ async def test_does_not_cache_a_failure() -> None:
 
     # A transient failure must not poison the cache for the rest of the process.
     assert await subject.exchange("caller-token") == "api-token"
+
+
+# ---------------------------------------------------------------- single-flight ---
+
+
+def slow_granting(delay: float = 0.05, expires_in: int = 300) -> object:
+    """Yields to the event loop like a real exchange, so concurrency is observable."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        await asyncio.sleep(delay)
+        return httpx.Response(
+            200, json={"access_token": f"api-token-{len(calls)}", "expires_in": expires_in}
+        )
+
+    handler.calls = calls  # type: ignore[attr-defined]
+    return handler
+
+
+async def test_collapses_concurrent_misses_for_one_caller_into_a_single_exchange() -> None:
+    handler = slow_granting()
+    subject = exchanger(handler)
+
+    tokens = await asyncio.gather(*(subject.exchange("caller-token") for _ in range(20)))
+
+    # A burst of tool calls is the case the cache exists for; without single-flight every
+    # one of them misses and hits the authorization server.
+    assert len(handler.calls) == 1  # type: ignore[attr-defined]
+    assert set(tokens) == {"api-token-1"}
+
+
+async def test_does_not_collapse_concurrent_exchanges_for_different_callers() -> None:
+    handler = slow_granting()
+    subject = exchanger(handler)
+
+    await asyncio.gather(subject.exchange("alice-token"), subject.exchange("bob-token"))
+
+    assert len(handler.calls) == 2  # type: ignore[attr-defined]
+
+
+async def test_a_failed_exchange_reaches_every_waiting_caller() -> None:
+    async def handler(_: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.02)
+        return httpx.Response(400, json={"error": "invalid_grant"})
+
+    subject = exchanger(handler)
+
+    results = await asyncio.gather(
+        *(subject.exchange("caller-token") for _ in range(5)), return_exceptions=True
+    )
+
+    assert all(isinstance(result, ExchangeError) for result in results)
+
+
+async def test_a_failed_exchange_does_not_block_the_next_attempt() -> None:
+    outcomes = iter(
+        [
+            httpx.Response(503),
+            httpx.Response(200, json={"access_token": "api-token", "expires_in": 300}),
+        ]
+    )
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.01)
+        return next(outcomes)
+
+    subject = exchanger(handler)
+
+    with pytest.raises(ExchangeError):
+        await subject.exchange("caller-token")
+
+    # The in-flight entry must be cleared on failure, or the token is stuck forever.
+    assert await subject.exchange("caller-token") == "api-token"
+
+
+async def test_one_caller_giving_up_does_not_cancel_the_exchange_for_the_others() -> None:
+    handler = slow_granting(delay=0.1)
+    subject = exchanger(handler)
+
+    async def wait() -> str:
+        return await subject.exchange("caller-token")
+
+    quitter = asyncio.create_task(wait())
+    stayer = asyncio.create_task(wait())
+    await asyncio.sleep(0.02)
+    quitter.cancel()
+
+    assert await stayer == "api-token-1"
+
+
+# ------------------------------------------------------------------- cache size ---
+
+
+async def test_sweeps_expired_entries_instead_of_growing_without_bound() -> None:
+    now = 1000.0
+    handler = granting(expires_in=300)
+    subject = exchanger(handler, clock=lambda: now)
+
+    for index in range(CACHE_SWEEP_THRESHOLD):
+        await subject.exchange(f"caller-{index}")
+    assert subject.cache_size() == CACHE_SWEEP_THRESHOLD
+
+    # Every entry is now expired, so the next insert should reclaim all of them.
+    now += 301
+    await subject.exchange("one-more")
+
+    assert subject.cache_size() == 1
+
+
+async def test_clears_the_cache_when_nothing_can_be_reclaimed() -> None:
+    handler = granting(expires_in=300)
+    subject = exchanger(handler, clock=lambda: 1000.0)
+
+    for index in range(CACHE_SWEEP_THRESHOLD + 1):
+        await subject.exchange(f"caller-{index}")
+
+    # All live, so a sweep frees nothing: drop everything rather than grow. The cost is
+    # re-exchanging, which is correct but slower — never unbounded memory.
+    assert subject.cache_size() == 1
+
+
+# ------------------------------------------------------------------------- ttl ---
+
+
+async def test_reuses_a_token_for_its_full_lifetime_less_the_margin() -> None:
+    now = 1000.0
+    handler = granting(expires_in=300)
+    subject = exchanger(handler, clock=lambda: now)
+
+    await subject.exchange("caller-token")
+    now += 300 - EXPIRY_MARGIN_SECONDS - 1
+    await subject.exchange("caller-token")
+
+    # Revocation is enforced by the API on every request, so the exchange does not need
+    # repeating just to notice one.
+    assert len(handler.calls) == 1  # type: ignore[attr-defined]
+
+
+async def test_stops_reusing_a_token_before_it_expires() -> None:
+    now = 1000.0
+    handler = granting(expires_in=300)
+    subject = exchanger(handler, clock=lambda: now)
+
+    await subject.exchange("caller-token")
+    now += 300 - EXPIRY_MARGIN_SECONDS
+    await subject.exchange("caller-token")
+
+    assert len(handler.calls) == 2  # type: ignore[attr-defined]
+
+
+async def test_never_holds_a_token_longer_than_the_ceiling() -> None:
+    now = 1000.0
+    # A malformed or over-generous `expires_in` must not pin a token in memory for hours.
+    handler = granting(expires_in=86_400)
+    subject = exchanger(handler, clock=lambda: now)
+
+    await subject.exchange("caller-token")
+    now += MAX_CACHE_SECONDS
+    await subject.exchange("caller-token")
+
+    assert len(handler.calls) == 2  # type: ignore[attr-defined]

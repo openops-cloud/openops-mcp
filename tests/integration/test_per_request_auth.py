@@ -1,10 +1,10 @@
 """Does a downstream request see the token of the request being served?
 
 Everything about HTTP mode rests on this. The tools are generated from an OpenAPI
-document and share one httpx client, so the only place a per-user credential can be
-attached is a request hook — and that only works if the hook runs inside the async
-context of the request being served. If it instead saw whichever token arrived first,
-two users would act as each other.
+document and share one httpx client, so a per-user credential can only be attached as the
+request goes out — and that only works if it is resolved inside the async context of the
+request being served. If it instead saw whichever token arrived first, two users would act
+as each other.
 
 These tests drive a real HTTP server over a real socket, because the property under
 test is a property of the transport.
@@ -25,9 +25,8 @@ from fastmcp.client.auth import BearerAuth
 from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier, RSAKeyPair
 
-from openops_mcp.auth.oauth import _caller_token
-from openops_mcp.openapi import prune_spec
-from openops_mcp.routes import RouteSpec
+from openops_mcp.auth.exchange import TokenExchanger
+from openops_mcp.auth.oauth import _AuthorizingTransport, _caller_token
 from openops_mcp.server import build_server
 
 ISSUER = "https://auth.example.com"
@@ -39,15 +38,13 @@ SPEC: dict[str, Any] = {
     "paths": {
         "/v1/flows/": {
             "get": {
-                "operationId": "listFlows",
+                "operationId": "list_flows",
                 "summary": "List flows",
                 "responses": {"200": {"description": "ok"}},
             }
         }
     },
 }
-
-ROUTES = [RouteSpec(path="/v1/flows/", methods=frozenset({"get"}), name="list_flows")]
 
 
 @pytest.fixture(scope="module")
@@ -121,10 +118,8 @@ def build_http_app(recorder: Recorder, keys: RSAKeyPair) -> Any:
         base_url="http://api.internal",
         event_hooks={"request": [recorder.hook()]},
     )
-    pruned, _ = prune_spec(SPEC, ROUTES)
     server = build_server(
-        spec=pruned,
-        routes=ROUTES,
+        spec=SPEC,
         client=downstream,
         auth=RemoteAuthProvider(
             token_verifier=JWTVerifier(
@@ -236,3 +231,90 @@ async def test_a_token_without_the_mcp_scope_is_refused(keys: RSAKeyPair) -> Non
 
     assert response.status_code in (httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN)
     assert recorder.seen == []
+
+
+# The tests above attach the credential with a stand-in hook so they can assert on
+# *whose* token arrived. This one runs the production path instead — the authorizing
+# transport and a real TokenExchanger — so the same isolation property is verified
+# through the mechanism that actually ships.
+
+
+def build_production_app(keys: RSAKeyPair, exchanges: list[str], presented: list[str]) -> Any:
+    def authorization_server(request: httpx.Request) -> httpx.Response:
+        subject = dict(pair.split("=", 1) for pair in request.content.decode().split("&"))[
+            "subject_token"
+        ]
+        exchanges.append(_subject_of(subject) or "?")
+        # A token naming the caller it was minted for, so a mix-up is visible downstream.
+        return httpx.Response(
+            200,
+            json={"access_token": f"api-token-for-{_subject_of(subject)}", "expires_in": 900},
+        )
+
+    def api(request: httpx.Request) -> httpx.Response:
+        presented.append(request.headers["authorization"])
+        return httpx.Response(200, json={"data": []})
+
+    exchanger = TokenExchanger(
+        token_endpoint="https://auth.example.com/v1/oauth/token",
+        client_id="openops-mcp-rs",
+        client_secret="s" * 32,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(authorization_server)),
+    )
+    downstream = httpx.AsyncClient(
+        base_url="http://api.internal",
+        transport=_AuthorizingTransport(exchanger=exchanger, inner=httpx.MockTransport(api)),
+    )
+
+    return build_server(
+        spec=SPEC,
+        client=downstream,
+        auth=RemoteAuthProvider(
+            token_verifier=JWTVerifier(
+                public_key=keys.public_key,
+                issuer=ISSUER,
+                audience=RESOURCE,
+                required_scopes=["mcp"],
+            ),
+            authorization_servers=[ISSUER],  # type: ignore[list-item]
+            base_url=RESOURCE,
+            resource_name="OpenOps",
+        ),
+    ).http_app(stateless_http=True)
+
+
+async def test_the_real_transport_exchanges_and_isolates_each_caller(keys: RSAKeyPair) -> None:
+    exchanges: list[str] = []
+    presented: list[str] = []
+    port = free_port()
+    url = f"http://127.0.0.1:{port}/mcp"
+
+    async for _ in serve(build_production_app(keys, exchanges, presented), port):
+
+        async def call(subject: str) -> None:
+            async with Client(url, auth=BearerAuth(token_for(keys, subject))) as client:
+                await client.call_tool("list_flows", {})
+
+        await asyncio.gather(call("alice"), call("bob"))
+
+    assert sorted(exchanges) == ["alice", "bob"], f"each caller must be exchanged; saw {exchanges}"
+    assert sorted(presented) == [
+        "Bearer api-token-for-alice",
+        "Bearer api-token-for-bob",
+    ], f"each API call must carry its own caller's token; saw {presented}"
+
+
+async def test_a_repeat_caller_is_served_from_the_cache(keys: RSAKeyPair) -> None:
+    exchanges: list[str] = []
+    presented: list[str] = []
+    port = free_port()
+    url = f"http://127.0.0.1:{port}/mcp"
+    token = token_for(keys, "alice")
+
+    async for _ in serve(build_production_app(keys, exchanges, presented), port):
+        for _attempt in range(3):
+            async with Client(url, auth=BearerAuth(token)) as client:
+                await client.call_tool("list_flows", {})
+
+    assert len(presented) == 3
+    assert exchanges == ["alice"], f"the same token must be exchanged once; saw {exchanges}"
