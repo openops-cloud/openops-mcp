@@ -5,14 +5,12 @@ from openops_mcp.config import ConfigError, HttpSettings, StdioSettings, load_se
 STDIO_ENV = {
     "MCP_TRANSPORT": "stdio",
     "OPENOPS_API_URL": "http://localhost:3000",
-    "OPENOPS_MCP_ROUTES": "/etc/openops/routes.yaml",
     "AUTH_TOKEN": "a-service-token",
 }
 
 HTTP_ENV = {
     "MCP_TRANSPORT": "http",
     "OPENOPS_API_URL": "https://app.example.com/api",
-    "OPENOPS_MCP_ROUTES": "/etc/openops/routes.yaml",
     "OPENOPS_MCP_ISSUER": "https://app.example.com/api",
     "OPENOPS_MCP_RESOURCE_URL": "https://app.example.com/mcp",
     "OPENOPS_MCP_CLIENT_SECRET": "s" * 32,
@@ -27,11 +25,6 @@ class TestStdio:
         assert settings.auth_token == "a-service-token"
         assert settings.common.api_url == "http://localhost:3000"
 
-    def test_defaults_the_openapi_url_from_the_api_url(self) -> None:
-        assert load_settings(STDIO_ENV).common.openapi_url == (
-            "http://localhost:3000/v1/openapi/json"
-        )
-
     def test_honours_an_explicit_openapi_url(self) -> None:
         settings = load_settings(
             {**STDIO_ENV, "OPENOPS_API_OPENAPI_URL": "http://elsewhere/spec.json"}
@@ -44,7 +37,7 @@ class TestStdio:
 
         assert isinstance(load_settings(env), StdioSettings)
 
-    @pytest.mark.parametrize("missing", ["OPENOPS_API_URL", "OPENOPS_MCP_ROUTES", "AUTH_TOKEN"])
+    @pytest.mark.parametrize("missing", ["OPENOPS_API_URL", "AUTH_TOKEN"])
     def test_names_the_variable_that_is_missing(self, missing: str) -> None:
         env = {k: v for k, v in STDIO_ENV.items() if k != missing}
 
@@ -75,7 +68,6 @@ class TestHttp:
             "OPENOPS_MCP_ISSUER",
             "OPENOPS_MCP_RESOURCE_URL",
             "OPENOPS_MCP_CLIENT_SECRET",
-            "OPENOPS_MCP_ROUTES",
         ],
     )
     def test_names_the_variable_that_is_missing(self, missing: str) -> None:
@@ -129,3 +121,36 @@ class TestHttp:
 def test_refuses_an_unknown_transport() -> None:
     with pytest.raises(ConfigError, match="MCP_TRANSPORT"):
         load_settings({**STDIO_ENV, "MCP_TRANSPORT": "grpc"})
+
+
+class TestSpecSource:
+    def test_defaults_to_the_profiled_endpoint(self) -> None:
+        settings = load_settings(STDIO_ENV)
+
+        assert settings.common.openapi_url == (
+            "http://localhost:3000/v1/mcp/openapi.json?profile=agent"
+        )
+        assert settings.common.openapi_path is None
+
+    def test_honours_a_requested_profile(self) -> None:
+        settings = load_settings({**STDIO_ENV, "OPENOPS_MCP_PROFILE": "chat"})
+
+        assert settings.common.openapi_url == (
+            "http://localhost:3000/v1/mcp/openapi.json?profile=chat"
+        )
+
+    def test_rejects_an_unknown_profile(self) -> None:
+        with pytest.raises(ConfigError, match="OPENOPS_MCP_PROFILE"):
+            load_settings({**STDIO_ENV, "OPENOPS_MCP_PROFILE": "root"})
+
+    def test_a_local_file_wins_over_any_url(self) -> None:
+        # What the API passes when it spawns this server per chat request.
+        settings = load_settings(
+            {**STDIO_ENV, "OPENAPI_SCHEMA_PATH": "/tmp/openapi-schema.json"}
+        )
+
+        assert settings.common.openapi_path == "/tmp/openapi-schema.json"
+
+    def test_starts_without_a_route_list(self) -> None:
+        # OPENOPS_MCP_ROUTES is gone: the API decides which operations become tools.
+        assert load_settings(STDIO_ENV).common.api_url == "http://localhost:3000"

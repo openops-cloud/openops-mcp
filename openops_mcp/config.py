@@ -18,7 +18,12 @@ Transport = Literal["stdio", "http"]
 
 DEFAULT_HTTP_HOST = "0.0.0.0"
 DEFAULT_HTTP_PORT = 3020
-DEFAULT_OPENAPI_PATH = "/v1/openapi/json"
+
+# Where the API publishes the operations one profile exposes as tools. The API owns that
+# list, so this server holds no allow-list of its own.
+DEFAULT_MCP_PATH = "/v1/mcp/openapi.json"
+DEFAULT_PROFILE = "agent"
+PROFILES = frozenset({"chat", "agent"})
 
 # The resource server authenticates to the authorization server as this client. It
 # must match RS_CLIENT_ID in the OpenOps API.
@@ -36,7 +41,9 @@ class ConfigError(Exception):
 class CommonSettings:
     api_url: str
     openapi_url: str
-    routes_file: str
+    # Set when the API spawns this process and hands it an already-filtered document.
+    # Takes precedence: reading a file it just wrote beats fetching over HTTP per spawn.
+    openapi_path: str | None
 
 
 @dataclass(frozen=True)
@@ -108,20 +115,37 @@ def _read_transport(env: dict[str, str]) -> Transport:
 
 
 def _load_common(env: dict[str, str]) -> CommonSettings:
-    # The API has historically spawned this server with API_BASE_URL and
-    # OPENAPI_SCHEMA_URL. Those are accepted as fallbacks so the two sides can be
+    # The API spawns this server with API_BASE_URL, OPENAPI_SCHEMA_URL and
+    # OPENAPI_SCHEMA_PATH. Those are accepted as fallbacks so the two sides can be
     # rolled out independently; they are pure renames with no change in meaning.
     _accept_legacy(env, "OPENOPS_API_URL", "API_BASE_URL")
     _accept_legacy(env, "OPENOPS_API_OPENAPI_URL", "OPENAPI_SCHEMA_URL")
+    _accept_legacy(env, "OPENOPS_API_OPENAPI_PATH", "OPENAPI_SCHEMA_PATH")
 
     api_url = _require_url("OPENOPS_API_URL", env)
     openapi_url = env.get("OPENOPS_API_OPENAPI_URL", "").strip()
+    openapi_path = env.get("OPENOPS_API_OPENAPI_PATH", "").strip()
+    profile = _read_profile(env)
 
     return CommonSettings(
         api_url=api_url,
-        openapi_url=openapi_url.rstrip("/") if openapi_url else f"{api_url}{DEFAULT_OPENAPI_PATH}",
-        routes_file=_require("OPENOPS_MCP_ROUTES", env),
+        openapi_url=openapi_url.rstrip("/")
+        if openapi_url
+        else f"{api_url}{DEFAULT_MCP_PATH}?profile={profile}",
+        openapi_path=openapi_path or None,
     )
+
+
+def _read_profile(env: dict[str, str]) -> str:
+    """Which of the API's published surfaces to serve."""
+    value = env.get("OPENOPS_MCP_PROFILE", DEFAULT_PROFILE).strip().lower()
+
+    if value not in PROFILES:
+        raise ConfigError(
+            f"OPENOPS_MCP_PROFILE must be one of {sorted(PROFILES)}, got {value!r}"
+        )
+
+    return value
 
 
 def _accept_legacy(env: dict[str, str], current: str, legacy: str) -> None:
