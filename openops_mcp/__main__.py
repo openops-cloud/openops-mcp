@@ -13,7 +13,7 @@ from fastmcp import FastMCP
 from .auth import static
 from .config import ConfigError, HttpSettings, Settings, StdioSettings, load_settings
 from .logging_config import setup_logging
-from .openapi import fetch_spec, read_spec
+from .openapi import fetch_spec, inject_project_parameter, is_multi_project, read_spec
 from .server import build_server
 
 logger = setup_logging()
@@ -44,12 +44,19 @@ def build(settings: Settings) -> FastMCP:
     spec = _load_spec(settings)
 
     if isinstance(settings, StdioSettings):
+        # No project selection here even on a multi-project deployment: the API mints this
+        # process a token for one project per chat request, and it cannot switch.
         return build_server(
             spec=spec,
             client=static.build_api_client(settings.common.api_url, settings.auth_token),
         )
 
     from .auth import oauth
+
+    if is_multi_project(spec):
+        spec = inject_project_parameter(spec)
+    else:
+        logger.info("The API reports a single project; tools take no project argument")
 
     return build_server(
         spec=spec,

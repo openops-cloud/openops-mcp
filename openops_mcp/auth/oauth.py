@@ -17,6 +17,7 @@ from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.server.dependencies import get_http_headers
 
 from ..config import CLIENT_ID, HttpSettings
+from ..openapi import PROJECT_PARAMETER
 from .exchange import ExchangeError, TokenExchanger
 
 logger = logging.getLogger(__name__)
@@ -114,7 +115,12 @@ class _AuthorizingTransport(httpx.AsyncBaseTransport):
         # than whichever request opened the session.
         caller_token = _caller_token()
 
-        response = await self._send(request, caller_token)
+        # Removed before anything is sent. The agent names a project as a tool argument,
+        # which FastMCP puts here; the API takes the project from the token's claim and
+        # would silently ignore a stray header, so this must not leak.
+        project_id = request.headers.pop(PROJECT_PARAMETER, None)
+
+        response = await self._send(request, caller_token, project_id)
         if response.status_code != httpx.codes.UNAUTHORIZED:
             return response
 
@@ -131,7 +137,7 @@ class _AuthorizingTransport(httpx.AsyncBaseTransport):
         # A second attempt goes back to the authorization server, which is the only place
         # that can say *why* — a revoked grant raises ExchangeError with the real reason
         # instead of handing the model an unexplained 401.
-        retried = await self._send(request, caller_token)
+        retried = await self._send(request, caller_token, project_id)
 
         if retried.status_code == httpx.codes.UNAUTHORIZED:
             # A fresh token was refused as well, so it is worth no more than the one it
@@ -141,13 +147,20 @@ class _AuthorizingTransport(httpx.AsyncBaseTransport):
 
         return retried
 
-    async def _send(self, request: httpx.Request, caller_token: str) -> httpx.Response:
+    async def _send(
+        self, request: httpx.Request, caller_token: str, project_id: str | None
+    ) -> httpx.Response:
         # Fail closed. Letting the request continue unauthorized would surface as a
         # confusing 401 from the API and hide the real cause.
-        api_token = await self._exchanger.exchange(caller_token)
+        api_token = await self._exchanger.exchange(caller_token, project_id)
         request.headers["Authorization"] = f"Bearer {api_token}"
 
-        logger.debug("Authorized %s %s for the calling user", request.method, request.url.path)
+        logger.debug(
+            "Authorized %s %s for the calling user in project %s",
+            request.method,
+            request.url.path,
+            project_id or "(the one its token names)",
+        )
 
         return await self._inner.handle_async_request(request)
 

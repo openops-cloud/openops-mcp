@@ -27,6 +27,7 @@ from fastmcp.server.auth.providers.jwt import JWTVerifier, RSAKeyPair
 
 from openops_mcp.auth.exchange import TokenExchanger
 from openops_mcp.auth.oauth import _AuthorizingTransport, _caller_token
+from openops_mcp.openapi import inject_project_parameter
 from openops_mcp.server import build_server
 
 ISSUER = "https://auth.example.com"
@@ -318,3 +319,108 @@ async def test_a_repeat_caller_is_served_from_the_cache(keys: RSAKeyPair) -> Non
 
     assert len(presented) == 3
     assert exchanges == ["alice"], f"the same token must be exchanged once; saw {exchanges}"
+
+
+def build_switching_app(
+    keys: RSAKeyPair,
+    projects: list[str | None],
+    api_requests: list[httpx.Request],
+) -> Any:
+    """The production wiring, on a document that offers project selection."""
+
+    def authorization_server(request: httpx.Request) -> httpx.Response:
+        form = dict(pair.split("=", 1) for pair in request.content.decode().split("&"))
+        projects.append(form.get("project_id"))
+        return httpx.Response(
+            200,
+            json={
+                "access_token": f"api-token-for-{form.get('project_id', 'default')}",
+                "expires_in": 900,
+            },
+        )
+
+    def api(request: httpx.Request) -> httpx.Response:
+        api_requests.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    exchanger = TokenExchanger(
+        token_endpoint="https://auth.example.com/v1/oauth/token",
+        client_id="openops-mcp-rs",
+        client_secret="s" * 32,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(authorization_server)),
+    )
+    downstream = httpx.AsyncClient(
+        base_url="http://api.internal",
+        transport=_AuthorizingTransport(exchanger=exchanger, inner=httpx.MockTransport(api)),
+    )
+
+    return build_server(
+        spec=inject_project_parameter({**SPEC, "x-openops-mcp": {"multiProject": True}}),
+        client=downstream,
+        auth=RemoteAuthProvider(
+            token_verifier=JWTVerifier(
+                public_key=keys.public_key,
+                issuer=ISSUER,
+                audience=RESOURCE,
+                required_scopes=["mcp"],
+            ),
+            authorization_servers=[ISSUER],  # type: ignore[list-item]
+            base_url=RESOURCE,
+            resource_name="OpenOps",
+        ),
+    ).http_app(stateless_http=True)
+
+
+async def test_the_project_an_agent_names_reaches_the_exchange(keys: RSAKeyPair) -> None:
+    projects: list[str | None] = []
+    api_requests: list[httpx.Request] = []
+    port = free_port()
+    url = f"http://127.0.0.1:{port}/mcp"
+
+    async for _ in serve(build_switching_app(keys, projects, api_requests), port):
+        async with Client(url, auth=BearerAuth(token_for(keys, "alice"))) as client:
+            await client.call_tool("list_flows", {"project_id": "project-b"})
+            await client.call_tool("list_flows", {})
+
+    # Named once, omitted once: the second call falls back to the token's own project.
+    assert projects == ["project-b", None]
+
+
+async def test_the_project_header_never_reaches_the_api(keys: RSAKeyPair) -> None:
+    projects: list[str | None] = []
+    api_requests: list[httpx.Request] = []
+    port = free_port()
+    url = f"http://127.0.0.1:{port}/mcp"
+
+    async for _ in serve(build_switching_app(keys, projects, api_requests), port):
+        async with Client(url, auth=BearerAuth(token_for(keys, "alice"))) as client:
+            await client.call_tool("list_flows", {"project_id": "project-b"})
+
+    # The API reads the project from the token's claim and would ignore a stray header, so
+    # a leak here would silently act in the wrong project rather than fail.
+    assert api_requests, "expected the tool call to reach the API"
+    assert "project_id" not in api_requests[0].headers
+    assert api_requests[0].headers["authorization"] == "Bearer api-token-for-project-b"
+
+
+async def test_two_projects_do_not_share_one_exchanged_token(keys: RSAKeyPair) -> None:
+    projects: list[str | None] = []
+    api_requests: list[httpx.Request] = []
+    port = free_port()
+    url = f"http://127.0.0.1:{port}/mcp"
+
+    async for _ in serve(build_switching_app(keys, projects, api_requests), port):
+        async with Client(url, auth=BearerAuth(token_for(keys, "alice"))) as client:
+            await client.call_tool("list_flows", {"project_id": "project-a"})
+            await client.call_tool("list_flows", {"project_id": "project-b"})
+            await client.call_tool("list_flows", {"project_id": "project-a"})
+
+    presented = [request.headers["authorization"] for request in api_requests]
+
+    assert presented == [
+        "Bearer api-token-for-project-a",
+        "Bearer api-token-for-project-b",
+        "Bearer api-token-for-project-a",
+    ]
+    # The repeat is served from the cache rather than exchanged again.
+    assert projects == ["project-a", "project-b"]

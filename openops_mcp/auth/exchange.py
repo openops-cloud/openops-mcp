@@ -69,9 +69,13 @@ class TokenExchanger:
         self._cache: dict[str, _Entry] = {}
         self._inflight: dict[str, asyncio.Task[str]] = {}
 
-    async def exchange(self, subject_token: str) -> str:
-        """Return an API-audience token for this client token, or raise ExchangeError."""
-        key = _key(subject_token)
+    async def exchange(self, subject_token: str, project_id: str | None = None) -> str:
+        """Return an API-audience token for this caller, or raise ExchangeError.
+
+        `project_id` names where the caller wants to act. Omitted, the authorization server
+        falls back to the project the subject token itself names.
+        """
+        key = _key(subject_token, project_id)
 
         cached = self._cache.get(key)
         if cached and cached.expires_at > self._clock():
@@ -79,7 +83,9 @@ class TokenExchanger:
 
         inflight = self._inflight.get(key)
         if inflight is None:
-            inflight = asyncio.create_task(self._exchange_and_store(key, subject_token))
+            inflight = asyncio.create_task(
+                self._exchange_and_store(key, subject_token, project_id)
+            )
             self._inflight[key] = inflight
 
         # An agent calls its tools in bursts, so the misses that matter arrive together.
@@ -87,9 +93,11 @@ class TokenExchanger:
         # the others are waiting on.
         return await asyncio.shield(inflight)
 
-    async def _exchange_and_store(self, key: str, subject_token: str) -> str:
+    async def _exchange_and_store(
+        self, key: str, subject_token: str, project_id: str | None
+    ) -> str:
         try:
-            token, expires_in = await self._request(subject_token)
+            token, expires_in = await self._request(subject_token, project_id)
             self._remember(key, token, expires_in)
             return token
         finally:
@@ -116,16 +124,25 @@ class TokenExchanger:
 
         self._cache[key] = _Entry(token=token, expires_at=now + lifetime)
 
-    async def _request(self, subject_token: str) -> tuple[str, float]:
+    async def _request(
+        self, subject_token: str, project_id: str | None
+    ) -> tuple[str, float]:
+        data = {
+            "grant_type": TOKEN_EXCHANGE_GRANT,
+            "subject_token": subject_token,
+            "subject_token_type": ACCESS_TOKEN_TYPE,
+        }
+
+        # Sent only when asked for, so a plain call keeps the subject token's own project
+        # rather than asserting one.
+        if project_id is not None:
+            data["project_id"] = project_id
+
         try:
             response = await self._http.post(
                 self._token_endpoint,
                 auth=self._auth,
-                data={
-                    "grant_type": TOKEN_EXCHANGE_GRANT,
-                    "subject_token": subject_token,
-                    "subject_token_type": ACCESS_TOKEN_TYPE,
-                },
+                data=data,
             )
         except httpx.HTTPError as exc:
             raise ExchangeError(f"could not reach the authorization server: {exc}") from exc
@@ -146,8 +163,16 @@ class TokenExchanger:
             ) from exc
 
     def evict(self, subject_token: str) -> None:
-        """Forget this caller's token, so the next call exchanges again."""
-        self._cache.pop(_key(subject_token), None)
+        """Forget everything held for this caller, so the next call exchanges again.
+
+        Every project, not just the one that failed: a 401 means the caller's own token is
+        no longer accepted, and a token minted from it is worth no more in one project than
+        in another.
+        """
+        prefix = _caller_prefix(subject_token)
+
+        for key in [key for key in self._cache if key.startswith(prefix)]:
+            del self._cache[key]
 
     def cache_size(self) -> int:
         """Entries currently held, expired or not. For tests and diagnostics."""
@@ -157,10 +182,16 @@ class TokenExchanger:
         await self._http.aclose()
 
 
-def _key(subject_token: str) -> str:
+def _caller_prefix(subject_token: str) -> str:
     """Key on the token, not the user: two tokens for one user may name different
     projects, and must not share an entry."""
-    return hashlib.sha256(subject_token.encode()).hexdigest()
+    return f"{hashlib.sha256(subject_token.encode()).hexdigest()}:"
+
+
+def _key(subject_token: str, project_id: str | None) -> str:
+    """One entry per caller *and* project, so a switch cannot be served a token minted
+    for somewhere else."""
+    return f"{_caller_prefix(subject_token)}{project_id or ''}"
 
 
 def _describe(response: httpx.Response) -> str:

@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import urllib.parse
 
 import httpx
 import pytest
@@ -326,3 +327,71 @@ async def test_never_holds_a_token_longer_than_the_ceiling() -> None:
     await subject.exchange("caller-token")
 
     assert len(handler.calls) == 2  # type: ignore[attr-defined]
+
+
+async def test_names_the_requested_project_in_the_exchange() -> None:
+    seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(dict(urllib.parse.parse_qsl(request.content.decode())))
+        return httpx.Response(200, json={"access_token": "api-token", "expires_in": 300})
+
+    await exchanger(handler).exchange("caller-token", project_id="project-9")
+
+    assert seen[0]["project_id"] == "project-9"
+
+
+async def test_omits_the_project_when_none_is_asked_for() -> None:
+    seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(dict(urllib.parse.parse_qsl(request.content.decode())))
+        return httpx.Response(200, json={"access_token": "api-token", "expires_in": 300})
+
+    await exchanger(handler).exchange("caller-token")
+
+    # Absent, not empty: the authorization server defaults to the subject token's project.
+    assert "project_id" not in seen[0]
+
+
+async def test_does_not_share_a_token_between_projects() -> None:
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200, json={"access_token": f"api-token-{calls}", "expires_in": 300}
+        )
+
+    subject = exchanger(handler)
+
+    first = await subject.exchange("caller-token", project_id="project-a")
+    second = await subject.exchange("caller-token", project_id="project-b")
+    again = await subject.exchange("caller-token", project_id="project-a")
+
+    # A token minted for one project must never authorize a call meant for another.
+    assert first != second
+    assert again == first
+    assert calls == 2
+
+
+async def test_evicting_a_caller_drops_every_project_it_holds() -> None:
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200, json={"access_token": f"api-token-{calls}", "expires_in": 300}
+        )
+
+    subject = exchanger(handler)
+    await subject.exchange("caller-token", project_id="project-a")
+    await subject.exchange("caller-token", project_id="project-b")
+    await subject.exchange("other-caller", project_id="project-a")
+
+    subject.evict("caller-token")
+
+    # A 401 means the caller's credential is dead, whichever project it was acting in.
+    assert subject.cache_size() == 1
