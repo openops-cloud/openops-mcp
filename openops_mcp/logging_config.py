@@ -29,7 +29,9 @@ def setup_logging() -> logging.Logger:
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 
-    console_handler = logging.StreamHandler(sys.stdout)
+    # stderr, never stdout: on the stdio transport stdout carries the MCP protocol, so a
+    # single log line written there corrupts the stream and the client drops the session.
+    console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(logging.DEBUG)
     console_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     console_handler.setFormatter(console_formatter)
