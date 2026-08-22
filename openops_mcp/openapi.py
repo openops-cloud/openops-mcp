@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import httpx
 from fastmcp.server.providers.openapi import MCPType, RouteMap
@@ -20,14 +20,12 @@ logger = logging.getLogger(__name__)
 
 MCP_EXTENSION_KEY = "x-openops-mcp"
 
-# The argument an agent uses to name where it is acting. A header because that is the only
-# OpenAPI parameter location that both reaches the tool's input schema and can be removed
-# from the request before it leaves this process — the API must never see it.
+# A header because it is the only parameter location that both reaches the tool's input
+# schema and can be stripped before the request leaves this process.
 PROJECT_PARAMETER = "project_id"
 
-# Kept to one sentence on purpose: it repeats in every tool's schema, so a second sentence
-# costs a few hundred tokens of context on every request the model makes. The workflow
-# belongs in the project-listing tool's own description.
+# One sentence: it repeats in every tool's schema. The workflow guidance lives on the
+# workspace-listing tool instead, where it is paid for once.
 PROJECT_PARAMETER_DESCRIPTION = (
     "Project to act in. Omit to use the project this connection was authorized for."
 )
@@ -107,65 +105,60 @@ def is_multi_project(spec: dict[str, Any]) -> bool:
     return extension.get("multiProject") is True
 
 
-def _declares_project_parameter(container: Any) -> bool:
-    parameters = (container or {}).get("parameters")
+def _reject_clash(where: str) -> NoReturn:
+    raise ConfigError(
+        f"{where} already declares a {PROJECT_PARAMETER!r} parameter; the MCP server "
+        "cannot add its own without one of them being renamed"
+    )
+
+
+def _declares_project_parameter(container: dict[str, Any]) -> bool:
+    parameters = container.get("parameters")
 
     if not isinstance(parameters, list):
         return False
 
-    return any(
-        isinstance(parameter, dict) and parameter.get("name") == PROJECT_PARAMETER
-        for parameter in parameters
-    )
+    return any(parameter.get("name") == PROJECT_PARAMETER for parameter in parameters)
+
+
+def _with_project_parameter(operation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **operation,
+        "parameters": [
+            *operation.get("parameters", []),
+            {
+                "name": PROJECT_PARAMETER,
+                "in": "header",
+                "required": False,
+                "schema": {"type": "string"},
+                "description": PROJECT_PARAMETER_DESCRIPTION,
+            },
+        ],
+    }
 
 
 def inject_project_parameter(spec: dict[str, Any]) -> dict[str, Any]:
     """Give every operation an optional `project_id`, so an agent can name where to act.
 
-    The value never reaches the API: the authorizing transport removes the header and uses
-    it to choose which token to mint, and the API still takes the project from that token's
-    claim. Returns a new document rather than editing the one it was handed.
+    The value never reaches the API: the authorizing transport strips the header and uses it
+    to choose which token to mint.
     """
     paths: dict[str, Any] = {}
 
     for path, operations in (spec.get("paths") or {}).items():
-        if not isinstance(operations, dict):
-            paths[path] = operations
-            continue
-
         if _declares_project_parameter(operations):
-            raise ConfigError(
-                f"{path} already declares a {PROJECT_PARAMETER!r} parameter; "
-                "the MCP server cannot add its own without renaming one of them"
-            )
+            _reject_clash(path)
 
-        rebuilt: dict[str, Any] = {}
+        rebuilt = dict(operations)
 
         for method, operation in operations.items():
-            if method.lower() not in _HTTP_METHODS or not isinstance(operation, dict):
-                rebuilt[method] = operation
+            if method.lower() not in _HTTP_METHODS:
                 continue
 
             if _declares_project_parameter(operation):
-                raise ConfigError(
-                    f"{method.upper()} {path} already declares a "
-                    f"{PROJECT_PARAMETER!r} parameter; the MCP server cannot add its own "
-                    "without renaming one of them"
-                )
+                _reject_clash(f"{method.upper()} {path}")
 
-            rebuilt[method] = {
-                **operation,
-                "parameters": [
-                    *operation.get("parameters", []),
-                    {
-                        "name": PROJECT_PARAMETER,
-                        "in": "header",
-                        "required": False,
-                        "schema": {"type": "string"},
-                        "description": PROJECT_PARAMETER_DESCRIPTION,
-                    },
-                ],
-            }
+            rebuilt[method] = _with_project_parameter(operation)
 
         paths[path] = rebuilt
 

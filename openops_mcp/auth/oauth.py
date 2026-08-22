@@ -115,9 +115,8 @@ class _AuthorizingTransport(httpx.AsyncBaseTransport):
         # than whichever request opened the session.
         caller_token = _caller_token()
 
-        # Removed before anything is sent. The agent names a project as a tool argument,
-        # which FastMCP puts here; the API takes the project from the token's claim and
-        # would silently ignore a stray header, so this must not leak.
+        # Stripped before sending: the API reads the project from the token's claim and
+        # would silently ignore a stray header rather than fail.
         project_id = request.headers.pop(PROJECT_PARAMETER, None)
 
         response = await self._send(request, caller_token, project_id)
@@ -156,10 +155,10 @@ class _AuthorizingTransport(httpx.AsyncBaseTransport):
         request.headers["Authorization"] = f"Bearer {api_token}"
 
         logger.debug(
-            "Authorized %s %s for the calling user in project %s",
+            "Authorized %s %s in project %s",
             request.method,
             request.url.path,
-            project_id or "(the one its token names)",
+            project_id or "(the token's own)",
         )
 
         return await self._inner.handle_async_request(request)

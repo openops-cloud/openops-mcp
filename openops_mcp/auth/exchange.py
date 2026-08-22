@@ -133,8 +133,7 @@ class TokenExchanger:
             "subject_token_type": ACCESS_TOKEN_TYPE,
         }
 
-        # Sent only when asked for, so a plain call keeps the subject token's own project
-        # rather than asserting one.
+        # Omitted rather than blank, so a plain call keeps the subject token's own project.
         if project_id is not None:
             data["project_id"] = project_id
 
@@ -163,11 +162,10 @@ class TokenExchanger:
             ) from exc
 
     def evict(self, subject_token: str) -> None:
-        """Forget everything held for this caller, so the next call exchanges again.
+        """Forget every project held for this caller, so the next call exchanges again.
 
-        Every project, not just the one that failed: a 401 means the caller's own token is
-        no longer accepted, and a token minted from it is worth no more in one project than
-        in another.
+        A 401 means the caller's own token is no longer accepted, which is true whichever
+        project it was acting in.
         """
         prefix = _caller_prefix(subject_token)
 
