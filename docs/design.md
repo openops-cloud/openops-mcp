@@ -1,5 +1,10 @@
 # OpenOps MCP server — transports and authentication
 
+> **Superseded.** This is the original design record, kept for its rationale only. It
+> describes a route allow-list and a "no project state" rule that no longer match the code.
+> For how the server works now, read [architecture.md](./architecture.md); for running it,
+> the [README](../README.md). This file is expected to be removed.
+
 **Status:** approved, not yet implemented
 **Linear:** OPS-4673
 **Counterpart:** the OAuth 2.1 authorization server in `openops-cloud/openops`
