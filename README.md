@@ -1,8 +1,8 @@
 # OpenOps MCP
 
 An [MCP](https://modelcontextprotocol.io) server that exposes OpenOps API operations as
-tools, so a language model can list workflows, inspect runs, read block metadata and — on an
-enterprise deployment — author and test workflows.
+tools, so a language model can list workflows, inspect runs, read block metadata and, where
+the API allows it, author and test workflows.
 
 It serves two very different consumers from one codebase:
 
@@ -16,9 +16,8 @@ It serves two very different consumers from one codebase:
 **This server does not decide which operations become tools. The API does.**
 
 It fetches a filtered OpenAPI document from the API and turns every operation in it into a
-tool. There is no allow-list here, no list of paths, and no notion of edition — grep the
-package for "enterprise" and you get nothing. If a tool exists, it is because the API
-published it.
+tool. There is no allow-list here and no list of paths. If a tool exists, it is because the
+API published it.
 
 ```
 GET {api}/v1/mcp/openapi.json?profile=agent
@@ -27,18 +26,18 @@ GET {api}/v1/mcp/openapi.json?profile=agent
       → one tool per operation
 ```
 
-The API publishes two **profiles**, named after consumers rather than editions:
+The API publishes two **profiles**, named after the consumer that reads them:
 
-- **`chat`** — what the built-in AI chat gets. Read-mostly: it reasons about workflows that
-  exist rather than authoring them.
-- **`agent`** — what external OAuth clients get. On an enterprise deployment this is the
-  richer `/mcp/*` authoring surface; on a community deployment it is the same read surface
-  as `chat`.
+- **`chat`** — what the built-in AI chat gets.
+- **`agent`** — what external OAuth clients get.
+
+What each contains is the API's decision, and the same profile can mean different things on
+different deployments: one may answer `agent` with a workflow-authoring surface and another
+with a read-only one. This server does not know or care which.
 
 Consequences worth internalising:
 
-- The same binary, unchanged, gives an enterprise or a community tool surface depending only
-  on which API it points at.
+- The same binary, unchanged, serves whatever surface the API it points at publishes.
 - Tool **names** come from each operation's `operationId`, and tool **descriptions** from its
   `description`. Both live in the API's route definitions, next to the code they describe. To
   rename a tool, or improve what a model is told about it, edit the API.
@@ -216,7 +215,8 @@ otherwise a checkout configured for http would hijack a stdio process.
 
 ## Acting in more than one project
 
-On an enterprise deployment over http, every tool takes an optional `project_id`:
+When the API reports more than one project and the transport is http, every tool takes an
+optional `project_id`:
 
 ```
 List_Workspaces()                → the projects this user belongs to

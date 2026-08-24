@@ -13,9 +13,9 @@ Work from the repository root. Prefer small, scoped changes. Avoid unrelated ref
 **This server does not decide which operations become tools. The API does.**
 
 It fetches a filtered OpenAPI document from the OpenOps API and turns every operation in it
-into a tool. There is no allow-list, no list of paths, and no notion of edition anywhere in
-the package — `grep -ri enterprise openops_mcp/` returns nothing, and that is a property to
-preserve, not an accident.
+into a tool. There is no allow-list and no list of paths anywhere in the package, and no
+knowledge of how any particular deployment is configured. That is a property to preserve, not
+an accident.
 
 So before adding anything here, ask where it belongs:
 

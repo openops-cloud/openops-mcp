@@ -70,7 +70,7 @@ class TestMultiProject:
         assert is_multi_project(SPEC) is True
 
     def test_defaults_to_single_project(self) -> None:
-        # An older API, or the community edition: absence must never enable switching.
+        # An API that does not publish the capability: absence must never enable switching.
         assert is_multi_project({"paths": {}}) is False
 
     def test_ignores_a_malformed_extension(self) -> None:

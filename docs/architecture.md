@@ -70,17 +70,14 @@ This server used to carry its own allow-list: two YAML files naming paths and me
 API had the same list for its built-in chat. They were two sources of truth in two languages,
 and they had already drifted.
 
-Worse, they encoded the wrong distinction. They were named after editions, but what they
-actually described was *consumers* — the built-in chat and an external agent get different
-surfaces on the same enterprise deployment. Editions and consumers are independent axes:
-
-|  | community API | enterprise API |
-| --- | --- | --- |
-| `profile=chat` | read surface | read surface |
-| `profile=agent` | read surface, single project | `/mcp/*` authoring surface, multi-project |
+Worse, they encoded the wrong distinction. They were named after deployment variants, but
+what they actually described was *consumers*: the built-in chat and an external agent are
+given different surfaces by the same API. Those are independent axes — which consumer is
+asking, and what that particular deployment chooses to offer it — and a file here could only
+ever guess at the second.
 
 Only the API knows which routes it registered, so only the API can answer this. Moving the
-list there deleted the duplication and the edition-guessing at once.
+list there deleted the duplication and the guessing at once.
 
 ### Two ways in
 
@@ -216,9 +213,8 @@ serves**, so a cached token stops being accepted the moment a connection is revo
 
 ## Choosing a project
 
-On an enterprise deployment over http, the API's document carries
-`x-openops-mcp: {"multiProject": true}`, and the server gives every operation an optional
-`project_id`:
+When the API's document carries `x-openops-mcp: {"multiProject": true}` and the transport is
+http, the server gives every operation an optional `project_id`:
 
 ```python
 inject project_id  ⟺  is_multi_project(spec)  and  transport == "http"
@@ -295,8 +291,8 @@ OAuth machinery it never uses.
 
 ## What is deliberately absent
 
-- **No edition awareness.** Nothing in the package mentions enterprise, community, or OSS. The
-  API's document decides everything.
+- **No knowledge of the deployment.** Nothing in the package describes how any particular
+  OpenOps instance is configured. The document it is served decides everything.
 - **No allow-list.** Deleted along with the YAML files it lived in.
 - **No tool name or description overrides.** They belong in the API's route definitions.
 - **No stored project.** See above.
