@@ -57,17 +57,41 @@ Consequences worth internalising:
 uv sync                 # creates .venv from uv.lock
 ```
 
-`uv.lock` is authoritative. `requirements.txt` is **generated** from it and must not be
-edited by hand — Snyk only scans that format, and the App container image installs from it.
-After changing a dependency, regenerate it and commit the result; CI re-runs the same export
-and fails on any difference:
+The virtual environment must live at `.venv` in the repository root: the API spawns this
+server as `<path>/.venv/bin/python <path>/main.py`, and that path is part of the contract.
+
+## Dependencies, and why there are two files
+
+`uv.lock` is the single source of truth. `requirements.txt` is **generated from it** and must
+never be edited by hand.
+
+Two consumers read that format, and neither reads `uv.lock`:
+
+- **Snyk** — the only dependency scanning this repository has. Before the export existed it
+  reported `1 test was skipped`: passing every run while examining nothing.
+- **The App container image**, which runs `uv pip install --no-cache-dir -r requirements.txt`.
+  It could not build at all between the migration to uv deleting the file and the export
+  restoring it.
+
+A generated twin of the lockfile is a deliberate exception to keeping one source of truth, and
+it is only tolerable because it cannot drift. CI re-runs the identical export and fails on any
+difference, so a dependency change that skips the regeneration cannot merge. The header uv
+writes into the file records the exact command, which is why CI must use that same command —
+regenerating with different flags or a different output path changes the header and the
+comparison fails for no real reason.
+
+After changing a dependency:
 
 ```bash
+uv lock
 uv export --format requirements-txt --no-dev --no-emit-project --frozen -o requirements.txt
 ```
 
-The virtual environment must live at `.venv` in the repository root: the API spawns this
-server as `<path>/.venv/bin/python <path>/main.py`, and that path is part of the contract.
+and commit `pyproject.toml`, `uv.lock` and `requirements.txt` together.
+
+`--no-dev` keeps development tools out of what ships and what is scanned. `--no-emit-project`
+leaves this package itself out, because the container runs it from source rather than
+installing it — the same reason `main.py` sits at the repository root.
 
 ## Running it
 

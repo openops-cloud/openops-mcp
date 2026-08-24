@@ -11,6 +11,7 @@ design decisions, and the failure modes that follow from them.
 - [Authentication](#authentication)
 - [Choosing a project](#choosing-a-project)
 - [Module map](#module-map)
+- [Dependencies](#dependencies)
 - [What is deliberately absent](#what-is-deliberately-absent)
 - [Failure modes](#failure-modes)
 - [Extending it](#extending-it)
@@ -295,6 +296,27 @@ OAuth machinery it never uses.
 - **No tool name or description overrides.** They belong in the API's route definitions.
 - **No stored project.** See above.
 - **No database or Redis.** The only state is derived caches.
+
+## Dependencies
+
+`uv.lock` is authoritative. `requirements.txt` is generated from it, and the generation is
+verified in CI rather than trusted.
+
+It exists because two consumers read that format and neither reads a lockfile: Snyk, which is
+the only dependency scanning this repository has, and the App container image, which
+pip-installs it. Snyk skipped the Python manifest entirely until the export appeared — a check
+that passed on every run while examining nothing — and the image could not build between the
+migration to uv and the export being restored.
+
+This is the one place in the repository where the same information lives in two files, which
+is worth being uncomfortable about, since a duplicated allow-list is exactly what the tool
+surface work deleted. The difference is that this copy is generated and machine-checked: CI
+re-runs the identical export and fails on any difference, so it cannot say something the
+lockfile does not. A hand-maintained second list would have no such guarantee.
+
+The container could avoid the file — `uv sync --frozen` produces the same environment, and the
+image already installs uv — but Snyk cannot, so the file stays and the image may as well use
+it. If Snyk gains lockfile support, the export and its CI job can both go.
 
 ## Failure modes
 
