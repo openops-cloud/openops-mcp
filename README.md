@@ -57,6 +57,15 @@ Consequences worth internalising:
 uv sync                 # creates .venv from uv.lock
 ```
 
+`uv.lock` is authoritative. `requirements.txt` is **generated** from it and must not be
+edited by hand — Snyk only scans that format, and the App container image installs from it.
+After changing a dependency, regenerate it and commit the result; CI re-runs the same export
+and fails on any difference:
+
+```bash
+uv export --format requirements-txt --no-dev --no-emit-project --frozen -o requirements.txt
+```
+
 The virtual environment must live at `.venv` in the repository root: the API spawns this
 server as `<path>/.venv/bin/python <path>/main.py`, and that path is part of the contract.
 
