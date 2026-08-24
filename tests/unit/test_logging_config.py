@@ -42,3 +42,25 @@ def test_the_env_file_is_loaded_before_logging_is_configured(
         entrypoint.main()
 
     assert calls == ["dotenv", "logging"]
+
+
+def test_defaults_to_info_so_third_party_debug_is_not_shipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+
+    assert setup_logging().level == logging.INFO
+
+
+def test_honours_an_explicit_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+
+    assert setup_logging().level == logging.DEBUG
+
+
+def test_falls_back_to_info_on_a_meaningless_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "chatty")
+
+    assert setup_logging().level == logging.INFO

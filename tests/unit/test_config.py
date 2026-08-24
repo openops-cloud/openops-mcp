@@ -154,3 +154,34 @@ class TestSpecSource:
     def test_starts_without_a_route_list(self) -> None:
         # OPENOPS_MCP_ROUTES is gone: the API decides which operations become tools.
         assert load_settings(STDIO_ENV).common.api_url == "http://localhost:3000"
+
+
+class TestTransportSecurity:
+    @pytest.mark.parametrize(
+        "name", ["OPENOPS_MCP_ISSUER", "OPENOPS_MCP_RESOURCE_URL"]
+    )
+    def test_refuses_cleartext_to_a_remote_host(self, name: str) -> None:
+        # The client secret travels to the issuer as HTTP Basic, and the resource URL is
+        # advertised to clients. The API refuses this configuration too.
+        with pytest.raises(ConfigError, match="https"):
+            load_settings({**HTTP_ENV, name: "http://app.example.com/elsewhere"})
+
+    @pytest.mark.parametrize(
+        "issuer",
+        [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://[::1]:3000",
+        ],
+    )
+    def test_allows_cleartext_to_loopback_for_local_development(self, issuer: str) -> None:
+        settings = load_settings({**HTTP_ENV, "OPENOPS_MCP_ISSUER": issuer})
+
+        assert isinstance(settings, HttpSettings)
+        assert settings.issuer == issuer
+
+    def test_still_allows_a_cleartext_api_url(self) -> None:
+        # Tool calls are pod-to-pod inside a cluster; only the OAuth endpoints are public.
+        settings = load_settings({**HTTP_ENV, "OPENOPS_API_URL": "http://openops-api:3000"})
+
+        assert settings.common.api_url == "http://openops-api:3000"

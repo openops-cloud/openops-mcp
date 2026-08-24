@@ -180,6 +180,11 @@ The issuer must match **exactly** — it is compared against the `iss` claim on 
 token. The resource URL must differ from the issuer; startup refuses otherwise, because equal
 audiences would let a token minted for one resource be accepted by the other.
 
+Both must use `https` unless they point at loopback. The client secret travels to the issuer
+as HTTP Basic and the resource URL is this server's advertised identity, so cleartext to a
+remote host is refused at startup. `OPENOPS_API_URL` is exempt: tool calls are pod-to-pod
+inside a cluster.
+
 ## Configuration reference
 
 | Variable | Transport | Default | Purpose |
@@ -195,6 +200,7 @@ audiences would let a token minted for one resource be accepted by the other.
 | `MCP_HTTP_PORT` | http | `3020` | Bind port |
 | `OPENOPS_API_OPENAPI_URL` | both | derived | Overrides where the document is fetched from |
 | `OPENOPS_API_OPENAPI_PATH` | both | unset | Read the document from a file instead; wins over any URL |
+| `LOG_LEVEL` | both | `INFO` | Console log level; `DEBUG` also makes every dependency verbose |
 | `LOGZIO_TOKEN`, `ENVIRONMENT` | both | unset | Optional log shipping |
 
 `API_BASE_URL`, `OPENAPI_SCHEMA_URL` and `OPENAPI_SCHEMA_PATH` are accepted as deprecated
@@ -229,12 +235,13 @@ description tells the model to keep passing the id it chose.
 
 ## Logging
 
-Everything goes to **stderr**, at DEBUG, plus Logz.io at INFO when `LOGZIO_TOKEN` is set.
+Everything goes to **stderr** at `INFO`, plus Logz.io when `LOGZIO_TOKEN` is set.
 
 stderr rather than stdout is not a style choice: on the stdio transport stdout carries the MCP
 protocol, so a single line written there corrupts the stream and the client drops the session.
-The root logger is set to DEBUG, so third-party libraries are verbose too — worth narrowing
-if these logs are shipped anywhere.
+
+`LOG_LEVEL=DEBUG` raises the level on the *root* logger, so every dependency becomes verbose
+too. Useful locally, worth avoiding wherever this server's stderr is collected.
 
 ## Troubleshooting
 

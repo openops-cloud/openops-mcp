@@ -20,14 +20,10 @@ logger = logging.getLogger(__name__)
 TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
 ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 
-# A ceiling on how long an exchanged token is reused, rather than a policy: the lifetime
-# the authorization server reports governs, and this only stops an implausible one from
-# pinning a token in memory for hours.
-#
-# Reuse does not delay revocation. The API re-checks the grant, the user's status and
-# their project access on every request it serves, so a cached token stops being accepted
-# the moment a connection is revoked — and `evict` drops it as soon as that surfaces as a
-# 401. That is what lets this window be a useful length rather than a cautious one.
+# A ceiling, not a policy: the lifetime the authorization server reports governs. Reuse
+# does not delay revocation, because the API re-checks the grant, the user and their
+# project access on every request — which is what lets this window be useful rather than
+# cautious.
 MAX_CACHE_SECONDS = 900.0
 
 # Discard a cached token slightly before it expires, so one is never used in the

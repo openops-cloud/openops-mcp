@@ -82,20 +82,17 @@ def read_spec(path: str) -> dict[str, Any]:
 
 
 def build_route_maps() -> list[RouteMap]:
-    """Every operation in the document becomes a tool.
-
-    The document is the allow-list, so there is nothing left to exclude here. Stated
-    explicitly rather than relying on FastMCP's default, so the intent survives a version
-    bump.
-    """
+    """Every operation becomes a tool: the document is the allow-list, so nothing is
+    excluded here. Stated rather than left to FastMCP's default, to survive a version
+    bump."""
     return [RouteMap(methods="*", pattern=r".*", mcp_type=MCPType.TOOL)]
 
 
 def is_multi_project(spec: dict[str, Any]) -> bool:
     """Whether the API says agents on this profile may act in more than one project.
 
-    Absent or malformed means no. Switching is the permissive answer, so it is never the
-    default for a document that does not ask for it.
+    Absent or malformed means no: switching is the permissive answer, so a document that
+    does not ask for it never gets it.
     """
     extension = spec.get(MCP_EXTENSION_KEY)
 
@@ -145,7 +142,7 @@ def inject_project_parameter(spec: dict[str, Any]) -> dict[str, Any]:
     """
     paths: dict[str, Any] = {}
 
-    for path, operations in (spec.get("paths") or {}).items():
+    for path, operations in spec["paths"].items():
         if _declares_project_parameter(operations):
             _reject_clash(path)
 

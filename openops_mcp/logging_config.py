@@ -25,14 +25,24 @@ class HTTPErrorFilter(logging.Filter):
         return not is_client_error
 
 
+def _console_level() -> int:
+    """INFO unless asked otherwise. DEBUG on the root logger makes every dependency
+    verbose, and those lines go wherever this server's stderr goes."""
+    requested = os.getenv("LOG_LEVEL", "").strip().upper()
+    level = logging.getLevelName(requested) if requested else logging.INFO
+
+    return level if isinstance(level, int) else logging.INFO
+
+
 def setup_logging() -> logging.Logger:
+    level = _console_level()
     logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(level)
 
     # stderr, never stdout: on the stdio transport stdout carries the MCP protocol, so a
     # single log line written there corrupts the stream and the client drops the session.
     console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setLevel(logging.DEBUG)
+    console_handler.setLevel(level)
     console_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)

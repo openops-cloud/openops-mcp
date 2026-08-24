@@ -184,3 +184,29 @@ class TestMalformedPaths:
 
         with pytest.raises(ConfigError, match="no OpenAPI 'paths'"):
             read_spec(str(path))
+
+
+class TestFetchFailures:
+    async def test_reports_an_unreachable_api(self) -> None:
+        def refuse(_request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection refused")
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(refuse)) as client:
+            with pytest.raises(ConfigError, match="could not fetch"):
+                await fetch_spec("http://api/v1/mcp/openapi.json", client)
+
+    async def test_reports_a_response_that_is_not_json(self) -> None:
+        transport = httpx.MockTransport(
+            lambda _request: httpx.Response(200, text="<html>nope</html>")
+        )
+
+        async with httpx.AsyncClient(transport=transport) as client:
+            with pytest.raises(ConfigError, match="did not return JSON"):
+                await fetch_spec("http://api/v1/mcp/openapi.json", client)
+
+    async def test_reports_an_error_status(self) -> None:
+        transport = httpx.MockTransport(lambda _request: httpx.Response(400))
+
+        async with httpx.AsyncClient(transport=transport) as client:
+            with pytest.raises(ConfigError, match="could not fetch"):
+                await fetch_spec("http://api/v1/mcp/openapi.json?profile=nope", client)

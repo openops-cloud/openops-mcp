@@ -32,6 +32,8 @@ CLIENT_ID = "openops-mcp-rs"
 # Anything shorter is guessable for a credential that never rotates on its own.
 MIN_CLIENT_SECRET_LENGTH = 32
 
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
 
 class ConfigError(Exception):
     """A configuration fault that must stop startup."""
@@ -92,6 +94,23 @@ def _require_url(name: str, env: dict[str, str]) -> str:
         raise ConfigError(f"{name} must not contain a query string or fragment")
 
     return value.rstrip("/")
+
+
+def _require_public_url(name: str, env: dict[str, str]) -> str:
+    """A URL that leaves the cluster, so cleartext is only acceptable to loopback.
+
+    The client secret travels to the issuer as HTTP Basic, and the resource URL is
+    advertised to clients as this server's identity. The API applies the same rule.
+    """
+    value = _require_url(name, env)
+    parsed = urlparse(value)
+
+    if parsed.scheme != "https" and (parsed.hostname or "").lower() not in LOOPBACK_HOSTS:
+        raise ConfigError(
+            f"{name} must use https unless it points at loopback, got {value!r}"
+        )
+
+    return value
 
 
 def _read_port(env: dict[str, str]) -> int:
@@ -163,8 +182,8 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     if transport == "stdio":
         return StdioSettings(common=common, auth_token=_require("AUTH_TOKEN", env))
 
-    issuer = _require_url("OPENOPS_MCP_ISSUER", env)
-    resource_url = _require_url("OPENOPS_MCP_RESOURCE_URL", env)
+    issuer = _require_public_url("OPENOPS_MCP_ISSUER", env)
+    resource_url = _require_public_url("OPENOPS_MCP_RESOURCE_URL", env)
 
     # Equal audiences would mean a token minted for the API satisfies this server's
     # audience check, so forwarding it would no longer be prevented by anything. The

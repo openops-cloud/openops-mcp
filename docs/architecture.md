@@ -150,6 +150,11 @@ full resource URI would double that path segment and point clients at metadata t
 exist. This is also why **an ingress must not rewrite the mount path** — a stripped prefix
 makes the advertised resource and the actual audience diverge.
 
+`OPENOPS_MCP_ISSUER` and `OPENOPS_MCP_RESOURCE_URL` must be `https` unless they name loopback:
+the first receives the client secret as HTTP Basic, and the second is the identity this server
+advertises. `OPENOPS_API_URL` is deliberately exempt, because tool calls stay inside the
+cluster while only the OAuth endpoints are public.
+
 **2. Exchanging it.** The client's token is addressed to this server, not to the API, so it is
 never forwarded — the MCP authorization spec's no-token-passthrough rule. `auth/exchange.py`
 presents it to the authorization server in an RFC 8693 exchange and receives a separate
@@ -335,7 +340,8 @@ the header and act in the token's project — a wrong answer, not an error.
 
 **Quiet, and worth remembering:** writing anything to stdout on the stdio transport corrupts
 the protocol stream, and the client reports a JSON-RPC parse error rather than pointing at the
-log line responsible. All logging goes to stderr for this reason.
+log line responsible. All logging goes to stderr for this reason, at `INFO` unless `LOG_LEVEL`
+says otherwise — `DEBUG` raises the root logger, so every dependency joins in.
 
 ## Extending it
 
