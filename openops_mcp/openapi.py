@@ -36,7 +36,7 @@ _HTTP_METHODS = frozenset(
 
 
 def _validate(spec: Any, source: str) -> dict[str, Any]:
-    if not isinstance(spec, dict) or "paths" not in spec:
+    if not isinstance(spec, dict) or not isinstance(spec.get("paths"), dict):
         raise ConfigError(f"{source} returned no OpenAPI 'paths'")
 
     logger.info("Loaded %d paths from %s", len(spec["paths"]), source)

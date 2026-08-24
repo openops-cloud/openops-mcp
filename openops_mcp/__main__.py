@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from typing import Any
 
@@ -16,7 +17,7 @@ from .logging_config import setup_logging
 from .openapi import fetch_spec, inject_project_parameter, is_multi_project, read_spec
 from .server import build_server
 
-logger = setup_logging()
+logger = logging.getLogger(__name__)
 
 SPEC_FETCH_TIMEOUT = 15.0
 
@@ -66,7 +67,10 @@ def build(settings: Settings) -> FastMCP:
 
 
 def main() -> None:
+    # Before logging is configured, so LOGZIO_TOKEN and ENVIRONMENT from .env are visible
+    # to it rather than only when exported.
     load_dotenv()
+    setup_logging()
 
     try:
         settings = load_settings()

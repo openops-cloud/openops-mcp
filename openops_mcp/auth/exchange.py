@@ -75,6 +75,9 @@ class TokenExchanger:
         `project_id` names where the caller wants to act. Omitted, the authorization server
         falls back to the project the subject token itself names.
         """
+        # An empty value is not a project. Normalized here so the cache key and the form
+        # field cannot disagree about whether one was asked for.
+        project_id = project_id or None
         key = _key(subject_token, project_id)
 
         cached = self._cache.get(key)

@@ -395,3 +395,25 @@ async def test_evicting_a_caller_drops_every_project_it_holds() -> None:
 
     # A 401 means the caller's credential is dead, whichever project it was acting in.
     assert subject.cache_size() == 1
+
+
+async def test_an_empty_project_is_treated_as_no_project() -> None:
+    seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # keep_blank_values, or an empty project_id that *was* sent is invisible here.
+        seen.append(
+            dict(
+                urllib.parse.parse_qsl(request.content.decode(), keep_blank_values=True)
+            )
+        )
+        return httpx.Response(200, json={"access_token": "api-token", "expires_in": 300})
+
+    subject = exchanger(handler)
+    await subject.exchange("caller-token", project_id="")
+
+    # Sending an empty project_id would be refused as invalid_target, while the cache
+    # keyed it as "no project" — so the same call succeeded or failed depending on
+    # whether something had warmed the cache.
+    assert "project_id" not in seen[0]
+    assert subject.cache_size() == 1

@@ -168,3 +168,19 @@ class TestInjectProjectParameter:
 
         with pytest.raises(ConfigError, match="/mcp/flows/"):
             inject_project_parameter(clashing)
+
+
+class TestMalformedPaths:
+    def test_rejects_a_null_paths_rather_than_crashing(self, tmp_path: Path) -> None:
+        path = tmp_path / "openapi-schema.json"
+        path.write_text(json.dumps({"openapi": "3.1.0", "paths": None}), encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="no OpenAPI 'paths'"):
+            read_spec(str(path))
+
+    def test_rejects_a_paths_that_is_not_a_mapping(self, tmp_path: Path) -> None:
+        path = tmp_path / "openapi-schema.json"
+        path.write_text(json.dumps({"openapi": "3.1.0", "paths": []}), encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="no OpenAPI 'paths'"):
+            read_spec(str(path))
