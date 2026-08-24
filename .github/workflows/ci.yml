@@ -26,6 +26,26 @@ jobs:
       - name: Ruff
         run: uv run ruff check openops_mcp tests
 
+  requirements:
+    # requirements.txt is generated, and two things read it: Snyk, which only scans
+    # that format, and the App image, which pip-installs it. Regenerating here proves
+    # it still matches the lockfile rather than trusting whoever last changed a
+    # dependency to have remembered.
+    name: Requirements Export
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      # The same command that generated the committed file, so the header uv writes
+      # into it matches and only a real dependency change shows up.
+      - name: Re-export and compare
+        run: |
+          uv export --format requirements-txt --no-dev --no-emit-project --frozen \
+            -o requirements.txt
+          git diff --exit-code -- requirements.txt
+
   types:
     name: Types
     runs-on: ubuntu-latest
