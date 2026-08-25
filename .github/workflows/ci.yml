@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      # --frozen fails when pyproject.toml and uv.lock disagree, so a dependency
+      # change that skipped the lock cannot merge.
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+      - name: Ruff
+        run: uv run ruff check openops_mcp tests
+
+  requirements:
+    # requirements.txt is generated, and two things read it: Snyk, which only scans
+    # that format, and the App image, which pip-installs it. Regenerating here proves
+    # it still matches the lockfile rather than trusting whoever last changed a
+    # dependency to have remembered.
+    name: Requirements Export
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      # The same command that generated the committed file, so the header uv writes
+      # into it matches and only a real dependency change shows up.
+      - name: Re-export and compare
+        run: |
+          uv export --format requirements-txt --no-dev --no-emit-project --frozen \
+            -o requirements.txt
+          git diff --exit-code -- requirements.txt
+
+  types:
+    name: Types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+      - name: Mypy
+        run: uv run mypy openops_mcp
+
+  test:
+    # The floor and the ceiling of requires-python. The floor is the one that
+    # breaks, since development happens on a newer interpreter.
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+      - name: Pytest
+        run: uv run pytest -q

@@ -1,1 +1,19 @@
+#############################################
+# Compilation output and runtime
+#############################################
+.venv
+__pycache__
+
 .env
+.vscode
+# macOS
+.DS_Store
+
+# build artefacts
+build/
+dist/
+*.spec
+*.egg-info/
+
+# editors
+.idea/
