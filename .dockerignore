@@ -1,0 +1,33 @@
+# Only what the Dockerfile COPYs should reach the build context. Everything else is
+# either regenerated inside the image (.venv), never shipped (tests, docs), or must not
+# be baked into an image at all (.env).
+
+# Local environments and secrets
+.venv
+.env
+.env.*
+
+# Python artefacts
+__pycache__
+*.py[cod]
+*.egg-info
+build/
+dist/
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Not needed at runtime
+tests/
+docs/
+.github/
+*.md
+env.example
+requirements.txt
+
+# Tooling
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store

@@ -78,3 +78,29 @@ jobs:
         run: uv sync --extra dev --frozen
       - name: Pytest
         run: uv run pytest -q
+
+  image:
+    # Build-only. Publishing to the registry is a separate workflow, triggered by pushes
+    # to main and by releases; this job exists so a Dockerfile that no longer builds on
+    # either architecture cannot merge, rather than failing at publish time.
+    name: Image (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform == 'amd64' && 'ubuntu-latest' || 'ubuntu-arm64' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.3.0
+      - name: Build image
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/${{ matrix.platform }}
+          build-args: VERSION=${{ github.sha }}
+          push: false
+          provenance: false
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}

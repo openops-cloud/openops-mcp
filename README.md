@@ -172,6 +172,32 @@ as HTTP Basic and the resource URL is this server's advertised identity, so clea
 remote host is refused at startup. `OPENOPS_API_URL` is exempt, because tool calls are
 pod-to-pod inside a cluster.
 
+## Docker
+
+The image serves the http transport as its own service next to the API. stdio isn't what it's
+for: the API image vendors this repository and spawns it per chat request.
+
+```bash
+docker build -t openops-mcp .
+
+docker run --rm -p 3020:3020 \
+  -e OPENOPS_API_URL=http://openops-api:3000 \
+  -e OPENOPS_MCP_PROFILE=agent \
+  -e OPENOPS_MCP_ISSUER=https://example.com/api \
+  -e OPENOPS_MCP_RESOURCE_URL=https://example.com/mcp \
+  -e OPENOPS_MCP_CLIENT_SECRET=<at least 32 characters> \
+  openops-mcp
+```
+
+`MCP_TRANSPORT=http`, `MCP_HTTP_HOST=0.0.0.0` and `MCP_HTTP_PORT=3020` are the image's
+defaults. The environment comes from `uv.lock` with the same `uv sync --frozen --no-dev` CI
+runs; the Dockerfile explains the rest of its choices inline.
+
+To test against an API on your machine, the issuer has to be `localhost`, and inside a
+container that's the container. Run with `--network host` (on Docker Desktop, enable it under
+Resources → Network) and point `OPENOPS_API_URL` and `OPENOPS_MCP_ISSUER` at
+`http://localhost:3000`.
+
 ## Configuration reference
 
 | Variable | Transport | Default | Purpose |
