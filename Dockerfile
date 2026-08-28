@@ -13,7 +13,7 @@
 ARG PYTHON_VERSION=3.13
 
 # ---- Builder stage: resolve the environment from the lockfile ----
-FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
+FROM python:${PYTHON_VERSION}-alpine AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.0 /uv /usr/local/bin/uv
 
@@ -32,7 +32,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
 # ---- Final stage: runtime only ----
-FROM python:${PYTHON_VERSION}-slim-bookworm
+FROM python:${PYTHON_VERSION}-alpine
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -48,8 +48,8 @@ ENV LANG=C.UTF-8 \
     FASTMCP_SHOW_SERVER_BANNER=false
 
 # No shell login, no home directory: the process needs neither.
-RUN groupadd --system --gid 10001 openops \
-    && useradd --system --uid 10001 --gid openops --no-create-home --shell /usr/sbin/nologin openops
+RUN addgroup -S -g 10001 openops \
+    && adduser -S -u 10001 -G openops -H -s /sbin/nologin openops
 
 WORKDIR /app
 
