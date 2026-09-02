@@ -1,0 +1,142 @@
+name: Publish
+
+# Builds the http-transport image for amd64 and arm64 and publishes it to Azure
+# Container Registry, following the tag conventions documented in the devops repo
+# (infra/azure/registry/README.md) — the registry cleanup task keys on those shapes.
+#
+#   push to main       -> openops.azurecr.io/openops-mcp
+#                         per arch:  <sha>-<arch>, main-<sha>-<arch>, main-<arch>
+#                         manifest:  <sha>, main
+#   release published  -> openopspublic.azurecr.io/openops-mcp: <version>, latest
+#                         (version = tag without leading v; latest not moved by pre-releases)
+#                         Not a rebuild: the release commit's image is promoted from the
+#                         private registry, the same way the openops release flow re-tags
+#                         the tested ECR image. Releasing a commit therefore requires that
+#                         its image was already published from main and not yet cleaned up.
+#   manual dispatch    -> openops.azurecr.io/openops-mcp     (branch builds, for testing)
+#                         per arch:  <sha>-<arch>, <branch>-<sha>-<arch>, <branch>-<arch>
+#                         manifest:  <sha>, <branch>
+#
+# The 8-character SHAs and the branch-name replacement set match the openops repos'
+# ECR convention. On pushes to main the branch is simply "main".
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Main pushes and manual dispatches. Releases don't build — see promote below.
+    name: Build and push (${{ matrix.platform }})
+    if: github.event_name != 'release'
+    runs-on: ${{ matrix.platform == 'amd64' && 'ubuntu-latest' || 'ubuntu-arm64' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Azure login
+        uses: azure/login@v3.0.2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ vars.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ vars.AZURE_TENANT_ID }}"}'
+      - name: ACR login
+        run: az acr login --name openops
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.3.0
+      - name: Format image tags
+        env:
+          ARCH: ${{ matrix.platform }}
+        run: |
+          short_sha="${GITHUB_SHA:0:8}"
+          branch="${GITHUB_REF_NAME//[\/.:_]/-}"
+          repo=openops.azurecr.io/openops-mcp
+          {
+            echo "SHORT_SHA=$short_sha"
+            echo "TAGS<<EOF"
+            echo "$repo:$short_sha-$ARCH"
+            echo "$repo:$branch-$short_sha-$ARCH"
+            echo "$repo:$branch-$ARCH"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+      - name: Build and push image
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/${{ matrix.platform }}
+          build-args: VERSION=${{ env.SHORT_SHA }}
+          tags: ${{ env.TAGS }}
+          push: true
+          provenance: false
+          # Same cache scopes as ci.yml. GHA caches are branch-scoped: PR builds
+          # cannot warm runs on main, but caches written here on main are readable
+          # by ci.yml's PR builds — main is every branch's fallback scope.
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+
+  manifest:
+    # Stitches the two per-arch images into one multi-arch manifest list per tag,
+    # so a plain pull resolves to the right architecture. Merged from the immutable
+    # sha tags, never the branch-named ones another run could move.
+    name: Publish multi-arch manifest
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure login
+        uses: azure/login@v3.0.2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ vars.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ vars.AZURE_TENANT_ID }}"}'
+      - name: ACR login
+        run: az acr login --name openops
+      - name: Create and push manifest lists
+        run: |
+          set -x
+          short_sha="${GITHUB_SHA:0:8}"
+          branch="${GITHUB_REF_NAME//[\/.:_]/-}"
+          repo=openops.azurecr.io/openops-mcp
+          docker buildx imagetools create \
+            -t "$repo:$short_sha" \
+            -t "$repo:$branch" \
+            "$repo:$short_sha-amd64" "$repo:$short_sha-arm64"
+
+  promote:
+    # Releases re-tag, not rebuild: the release commit's multi-arch image, already
+    # built from main and running in environments, is copied from the private to the
+    # public registry under the version tags — the same promotion model as the
+    # openops release flow. imagetools create copies the blobs across registries.
+    name: Promote release image
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure login
+        uses: azure/login@v3.0.2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ vars.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ vars.AZURE_TENANT_ID }}"}'
+      - name: ACR login
+        run: |
+          az acr login --name openops
+          az acr login --name openopspublic
+      - name: Promote image to the public registry
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          version="${TAG#v}"
+          source="openops.azurecr.io/openops-mcp:${GITHUB_SHA:0:8}"
+          tags=(-t "openopspublic.azurecr.io/openops-mcp:$version")
+          # Anonymous consumers pull :latest by default; a pre-release must not move it.
+          if [ "$PRERELEASE" != "true" ]; then
+            tags+=(-t "openopspublic.azurecr.io/openops-mcp:latest")
+          fi
+          docker buildx imagetools create "${tags[@]}" "$source"
