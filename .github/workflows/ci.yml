@@ -80,10 +80,12 @@ jobs:
         run: uv run pytest -q
 
   image:
-    # Build-only. Publishing to the registry is a separate workflow, triggered by pushes
-    # to main and by releases; this job exists so a Dockerfile that no longer builds on
-    # either architecture cannot merge, rather than failing at publish time.
+    # Build-only, so a Dockerfile that no longer builds on either architecture cannot
+    # merge, rather than failing at publish time. Skipped on pushes to main: there the
+    # Publish workflow builds the same image for real, and running both would waste two
+    # builds and race it for the shared cache scopes.
     name: Image (${{ matrix.platform }})
+    if: github.event_name != 'push'
     runs-on: ${{ matrix.platform == 'amd64' && 'ubuntu-latest' || 'ubuntu-arm64' }}
     strategy:
       fail-fast: false
