@@ -199,8 +199,8 @@ Resources → Network) and point `OPENOPS_API_URL` and `OPENOPS_MCP_ISSUER` at
 `http://localhost:3000`.
 
 Published images (multi-arch, amd64 and arm64) come from the Publish workflow: releases go to
-`openopspublic.azurecr.io/openops-mcp:<version>` (and `latest`), pullable anonymously; pushes
-to `main` go to the private `openops.azurecr.io/openops-mcp:main`.
+`openops.azurecr.io/openops-mcp:<version>` (and `latest`), pullable anonymously; pushes to
+`main` go to the private `openopsinternal.azurecr.io/openops-mcp:main`.
 
 ## Configuration reference
 

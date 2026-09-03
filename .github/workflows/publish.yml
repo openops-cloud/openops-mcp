@@ -4,16 +4,16 @@ name: Publish
 # Container Registry, following the tag conventions documented in the devops repo
 # (infra/azure/registry/README.md) — the registry cleanup task keys on those shapes.
 #
-#   push to main       -> openops.azurecr.io/openops-mcp
+#   push to main       -> openopsinternal.azurecr.io/openops-mcp
 #                         per arch:  <sha>-<arch>, main-<sha>-<arch>, main-<arch>
 #                         manifest:  <sha>, main
-#   release published  -> openopspublic.azurecr.io/openops-mcp: <version>, latest
+#   release published  -> openops.azurecr.io/openops-mcp: <version>, latest
 #                         (version = tag without leading v; latest not moved by pre-releases)
 #                         Not a rebuild: the release commit's image is promoted from the
 #                         private registry, the same way the openops release flow re-tags
 #                         the tested ECR image. Releasing a commit therefore requires that
 #                         its image was already published from main and not yet cleaned up.
-#   manual dispatch    -> openops.azurecr.io/openops-mcp     (branch builds, for testing)
+#   manual dispatch    -> openopsinternal.azurecr.io/openops-mcp     (branch builds, for testing)
 #                         per arch:  <sha>-<arch>, <branch>-<sha>-<arch>, <branch>-<arch>
 #                         manifest:  <sha>, <branch>
 #
@@ -51,7 +51,7 @@ jobs:
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
       - name: ACR login
-        run: az acr login --name openops
+        run: az acr login --name openopsinternal
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.3.0
       - name: Format image tags
@@ -60,7 +60,7 @@ jobs:
         run: |
           short_sha="${GITHUB_SHA:0:8}"
           branch="${GITHUB_REF_NAME//[\/.:_]/-}"
-          repo=openops.azurecr.io/openops-mcp
+          repo=openopsinternal.azurecr.io/openops-mcp
           {
             echo "SHORT_SHA=$short_sha"
             echo "TAGS<<EOF"
@@ -98,7 +98,7 @@ jobs:
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
       - name: ACR login
-        run: az acr login --name openops
+        run: az acr login --name openopsinternal
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.3.0
       - name: Create and push manifest lists
@@ -106,7 +106,7 @@ jobs:
           set -x
           short_sha="${GITHUB_SHA:0:8}"
           branch="${GITHUB_REF_NAME//[\/.:_]/-}"
-          repo=openops.azurecr.io/openops-mcp
+          repo=openopsinternal.azurecr.io/openops-mcp
           docker buildx imagetools create \
             -t "$repo:$short_sha" \
             -t "$repo:$branch" \
@@ -127,8 +127,8 @@ jobs:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
       - name: ACR login
         run: |
+          az acr login --name openopsinternal
           az acr login --name openops
-          az acr login --name openopspublic
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.3.0
       - name: Promote image to the public registry
@@ -137,10 +137,10 @@ jobs:
           PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           version="${TAG#v}"
-          source="openops.azurecr.io/openops-mcp:${GITHUB_SHA:0:8}"
-          tags=(-t "openopspublic.azurecr.io/openops-mcp:$version")
+          source="openopsinternal.azurecr.io/openops-mcp:${GITHUB_SHA:0:8}"
+          tags=(-t "openops.azurecr.io/openops-mcp:$version")
           # Anonymous consumers pull :latest by default; a pre-release must not move it.
           if [ "$PRERELEASE" != "true" ]; then
-            tags+=(-t "openopspublic.azurecr.io/openops-mcp:latest")
+            tags+=(-t "openops.azurecr.io/openops-mcp:latest")
           fi
           docker buildx imagetools create "${tags[@]}" "$source"
