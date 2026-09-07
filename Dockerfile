@@ -10,7 +10,7 @@
 # environment is resolved from uv.lock exactly as CI does (--frozen), so the image cannot
 # quietly drift from what was tested.
 
-ARG PYTHON_VERSION=3.13
+ARG PYTHON_VERSION=3.14
 
 # ---- Builder stage: resolve the environment from the lockfile ----
 FROM python:${PYTHON_VERSION}-alpine AS builder

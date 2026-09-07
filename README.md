@@ -38,7 +38,7 @@ list.
 
 ## Requirements
 
-- Python 3.10–3.14
+- Python 3.14
 - [uv](https://docs.astral.sh/uv/)
 - A running OpenOps API
 
