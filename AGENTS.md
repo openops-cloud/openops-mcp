@@ -52,7 +52,7 @@ the wrong repository.
 uv sync --extra dev
 ```
 
-Python 3.10–3.13. The virtual environment must be `.venv` in the repository root, because the
+Python 3.10–3.14. The virtual environment must be `.venv` in the repository root, because the
 spawn contract names that path.
 
 ## Commands
@@ -64,8 +64,8 @@ uv run mypy openops_mcp                    # strict; no new ignores without a re
 uv run ruff check openops_mcp tests
 ```
 
-Run all three before proposing a change. CI runs exactly these, plus the suite on both 3.10
-and 3.13, plus a check that `requirements.txt` still matches the lockfile.
+Run all three before proposing a change. CI runs exactly these, plus the suite on 3.10,
+3.13 and 3.14, plus a check that `requirements.txt` still matches the lockfile.
 
 ## Testing expectations
 
