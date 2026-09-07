@@ -52,8 +52,9 @@ the wrong repository.
 uv sync --extra dev
 ```
 
-Python 3.14. The virtual environment must be `.venv` in the repository root, because the
-spawn contract names that path.
+Python 3.14, pinned in `.python-version` so `uv` picks it without being asked. The virtual
+environment must be `.venv` in the repository root, because the spawn contract names that
+path.
 
 ## Commands
 
