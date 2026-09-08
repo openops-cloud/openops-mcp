@@ -38,14 +38,14 @@ list.
 
 ## Requirements
 
-- Python 3.10–3.13
+- Python 3.14
 - [uv](https://docs.astral.sh/uv/)
 - A running OpenOps API
 
 ## Install
 
 ```bash
-uv sync                 # creates .venv from uv.lock
+uv sync                 # creates .venv from uv.lock, on the 3.14 in .python-version
 ```
 
 Keep the virtual environment at `.venv` in the repository root. The API spawns this server as
