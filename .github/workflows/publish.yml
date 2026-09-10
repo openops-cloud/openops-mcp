@@ -4,21 +4,26 @@ name: Publish
 # Container Registry, following the tag conventions documented in the devops repo
 # (infra/azure/registry/README.md) — the registry cleanup task keys on those shapes.
 #
-#   push to main       -> openopsprivate.azurecr.io/openops-mcp
+#   push to main       -> the private registry (vars.ACR_LOGIN_SERVER) /openops-mcp
 #                         per arch:  <sha>-<arch>, main-<sha>-<arch>, main-<arch>
 #                         manifest:  <sha>, main
-#   release published  -> openops.azurecr.io/openops-mcp: <version>, latest
+#   release published  -> the public registry (vars.ACR_PUBLIC_LOGIN_SERVER): <version>, latest
 #                         (version = tag without leading v; latest not moved by pre-releases)
-#                         Not a rebuild: the release commit's image is promoted from the
-#                         private registry, the same way the openops release flow re-tags
-#                         the tested ECR image. Releasing a commit therefore requires that
-#                         its image was already published from main and not yet cleaned up.
-#   manual dispatch    -> openopsprivate.azurecr.io/openops-mcp     (branch builds, for testing)
-#                         per arch:  <sha>-<arch>, <branch>-<sha>-<arch>, <branch>-<arch>
-#                         manifest:  <sha>, <branch>
+#                         Not a rebuild: the release commit's image is imported from the
+#                         private registry, the same way the openops and tables release
+#                         flows promote a tested image. Releasing a commit therefore
+#                         requires that its image was already published from main and not
+#                         yet cleaned up.
+#   manual dispatch    -> the private registry, from main only
+#                         per arch:  <sha>-<arch>, main-<sha>-<arch>, main-<arch>
+#                         manifest:  <sha>, main
 #
-# The 8-character SHAs and the branch-name replacement set match the openops repos'
-# ECR convention. On pushes to main the branch is simply "main".
+# Dispatching from another branch fails at azure/login: the federated credential's
+# subject is refs/heads/main, and a dispatch presents the ref it ran from. Building a
+# branch is what ci.yml does, without pushing.
+#
+# The 8-character SHAs and the branch-name replacement set match the other openops
+# repositories' convention, which the registry cleanup task keys on.
 
 on:
   push:
@@ -39,6 +44,9 @@ jobs:
     # Main pushes and manual dispatches. Releases don't build — see promote below.
     name: Build and push (${{ matrix.platform }})
     if: github.event_name != 'release'
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ${{ matrix.platform == 'amd64' && 'ubuntu-latest' || 'ubuntu-arm64' }}
     strategy:
       fail-fast: false
@@ -49,18 +57,28 @@ jobs:
       - name: Azure login
         uses: azure/login@v3.0.2
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          client-id: ${{ secrets.AZURE_ACR_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: ACR login
-        run: az acr login --name openopsprivate
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          : "${ACR_NAME:?must be set to the private registry name}"
+          az acr login --name "$ACR_NAME"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.3.0
       - name: Format image tags
         env:
           ARCH: ${{ matrix.platform }}
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
         run: |
+          # Empty would silently build "/openops-mcp" and fail on a reference nobody
+          # recognises, so fail on the variable instead.
+          : "${ACR_LOGIN_SERVER:?must be set to the private registry login server}"
           short_sha="${GITHUB_SHA:0:8}"
           branch="${GITHUB_REF_NAME//[\/.:_]/-}"
-          repo=openopsprivate.azurecr.io/openops-mcp
+          repo=$ACR_LOGIN_SERVER/openops-mcp
           {
             echo "SHORT_SHA=$short_sha"
             echo "TAGS<<EOF"
@@ -92,55 +110,92 @@ jobs:
     name: Publish multi-arch manifest
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Azure login
         uses: azure/login@v3.0.2
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          client-id: ${{ secrets.AZURE_ACR_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: ACR login
-        run: az acr login --name openopsprivate
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          : "${ACR_NAME:?must be set to the private registry name}"
+          az acr login --name "$ACR_NAME"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.3.0
       - name: Create and push manifest lists
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
         run: |
           set -x
+          # Empty would silently build "/openops-mcp" and fail on a reference nobody
+          # recognises, so fail on the variable instead.
+          : "${ACR_LOGIN_SERVER:?must be set to the private registry login server}"
           short_sha="${GITHUB_SHA:0:8}"
           branch="${GITHUB_REF_NAME//[\/.:_]/-}"
-          repo=openopsprivate.azurecr.io/openops-mcp
+          repo=$ACR_LOGIN_SERVER/openops-mcp
           docker buildx imagetools create \
             -t "$repo:$short_sha" \
             -t "$repo:$branch" \
             "$repo:$short_sha-amd64" "$repo:$short_sha-arm64"
 
   promote:
-    # Releases re-tag, not rebuild: the release commit's multi-arch image, already
-    # built from main and running in environments, is copied from the private to the
-    # public registry under the version tags — the same promotion model as the
-    # openops release flow. imagetools create copies the blobs across registries.
+    # Releases re-tag, not rebuild: the release commit's multi-arch image, already built from
+    # main and running in environments, is copied from the private registry to the public one
+    # under the version tags — the same promotion model as openops and tables.
+    #
+    # `az acr import` rather than pulling and pushing the manifest: it is an ARM call the
+    # registry performs server-side, so no blobs cross the runner, there is nothing to docker
+    # login to, and a manifest list is copied whole with its digest intact. It needs Data
+    # Importer and Data Reader on both registries, which is what the release identity holds and
+    # what every other repository's promotion already uses.
     name: Promote release image
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    # The release identity's federated credential is scoped to this environment rather than to a
+    # branch, and the environment is where an approval gate for publishing to the registry
+    # customers pull from belongs. Without it the OIDC subject does not match.
+    environment: release
     steps:
       - name: Azure login
         uses: azure/login@v3.0.2
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
-      - name: ACR login
-        run: |
-          az acr login --name openopsprivate
-          az acr login --name openops
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4.3.0
-      - name: Promote image to the public registry
+          client-id: ${{ secrets.AZURE_ACR_RELEASE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Import the image into the public registry
         env:
           TAG: ${{ github.event.release.tag_name }}
           PRERELEASE: ${{ github.event.release.prerelease }}
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+          ACR_PUBLIC_NAME: ${{ vars.ACR_PUBLIC_NAME }}
+          ACR_PUBLIC_LOGIN_SERVER: ${{ vars.ACR_PUBLIC_LOGIN_SERVER }}
         run: |
+          : "${ACR_LOGIN_SERVER:?must be set to the private registry login server}"
+          : "${ACR_PUBLIC_NAME:?must be set to the public registry name}"
+          : "${ACR_PUBLIC_LOGIN_SERVER:?must be set to the public registry login server}"
           version="${TAG#v}"
-          source="openopsprivate.azurecr.io/openops-mcp:${GITHUB_SHA:0:8}"
-          tags=(-t "openops.azurecr.io/openops-mcp:$version")
+          source="openops-mcp:${GITHUB_SHA:0:8}"
+          echo "- 🚀 Source image: \`$ACR_LOGIN_SERVER/$source\`" >> "$GITHUB_STEP_SUMMARY"
+          import_as() {
+            az acr import \
+              --name "$ACR_PUBLIC_NAME" \
+              --registry "$ACR_LOGIN_SERVER" \
+              --source "$source" \
+              --image "openops-mcp:$1" \
+              --force
+            echo "- ✅ Successfully tagged as \`$ACR_PUBLIC_LOGIN_SERVER/openops-mcp:$1\`" >> "$GITHUB_STEP_SUMMARY"
+          }
+          import_as "$version"
           # Anonymous consumers pull :latest by default; a pre-release must not move it.
           if [ "$PRERELEASE" != "true" ]; then
-            tags+=(-t "openops.azurecr.io/openops-mcp:latest")
+            import_as latest
           fi
-          docker buildx imagetools create "${tags[@]}" "$source"
