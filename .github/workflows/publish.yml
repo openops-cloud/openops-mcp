@@ -60,7 +60,11 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: ACR login
-        run: az acr login --name ${{ vars.ACR_NAME }}
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          : "${ACR_NAME:?must be set to the private registry name}"
+          az acr login --name "$ACR_NAME"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.3.0
       - name: Format image tags
@@ -116,7 +120,11 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: ACR login
-        run: az acr login --name ${{ vars.ACR_NAME }}
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          : "${ACR_NAME:?must be set to the private registry name}"
+          az acr login --name "$ACR_NAME"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.3.0
       - name: Create and push manifest lists
@@ -158,9 +166,14 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: ACR login
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          ACR_PUBLIC_NAME: ${{ vars.ACR_PUBLIC_NAME }}
         run: |
-          az acr login --name ${{ vars.ACR_NAME }}
-          az acr login --name ${{ vars.ACR_PUBLIC_NAME }}
+          : "${ACR_NAME:?must be set to the private registry name}"
+          : "${ACR_PUBLIC_NAME:?must be set to the public registry name}"
+          az acr login --name "$ACR_NAME"
+          az acr login --name "$ACR_PUBLIC_NAME"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.3.0
       - name: Promote image to the public registry
