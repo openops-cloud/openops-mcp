@@ -1,0 +1,131 @@
+name: Release
+
+# Cuts a release of the current main commit: verifies the commit's image was already
+# published from main, then creates the tag and a GitHub release. Publishing the release
+# is what triggers the promote job in publish.yml, which imports that image into the
+# public registry as openops-mcp:<version> (and latest).
+#
+# The version is chosen here, not read from a file, as in the openops, tables and
+# analytics repositories: left blank it is the next patch after the latest tag, and an
+# override bumps minor or major. Tags carry no "v" prefix. The version in pyproject.toml
+# is informational only; nothing reads it, and it is not bumped by a release.
+#
+# Runs from main only: the release identity's federated credential is scoped to the release
+# environment, and the image check needs that identity.
+
+run-name: Release ${{ inputs.version || 'next patch version' }}${{ inputs.draft && ' (draft)' || '' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        description: Override the version, for example to increment minor or major (leave blank for the next patch)
+      draft:
+        type: boolean
+        description: Create the release as a draft (publish it by hand to promote the image)
+        default: true
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Create the GitHub release
+    runs-on: ubuntu-latest
+    # Required reviewers on this environment are the approval gate for publishing.
+    environment: release
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Get next version
+        if: inputs.version == ''
+        id: semver
+        uses: flatherskevin/semver-action@9fb0c115a0bede9fa0743f4823b4182040a4983a # 1.1.5
+        with:
+          incrementLevel: patch
+          source: tags
+
+      - name: Resolve the version
+        id: version
+        env:
+          VERSION: ${{ inputs.version || steps.semver.outputs.nextVersion }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$VERSION' is not a bare semantic version (no leading v)" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null; then
+            echo "::error::Tag $VERSION already exists" >&2
+            exit 1
+          fi
+          prerelease=false
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease=true
+          fi
+          {
+            echo "version=$VERSION"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Azure login
+        # The release identity: its federated credential is scoped to the release environment,
+        # and it holds Data Reader on the private registry, which is all this check needs.
+        uses: azure/login@v3.0.2
+        with:
+          client-id: ${{ secrets.AZURE_ACR_RELEASE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check the image for this commit exists in the private registry
+        # promote imports rather than rebuilds, so a commit whose main build was never
+        # published, or was already cleaned up, cannot be released.
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+        run: |
+          set -euo pipefail
+          : "${ACR_NAME:?must be set to the private registry name}"
+          short_sha="${GITHUB_SHA:0:8}"
+          if ! az acr manifest show-metadata --registry "$ACR_NAME" --name "openops-mcp:$short_sha" --only-show-errors >/dev/null; then
+            echo "::error::No image $ACR_LOGIN_SERVER/openops-mcp:$short_sha. Release a commit on main whose Publish run succeeded." >&2
+            exit 1
+          fi
+
+      - name: Create the GitHub release
+        id: release
+        uses: softprops/action-gh-release@v3.0.3
+        with:
+          target_commitish: ${{ github.sha }}
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+
+      - name: Write summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DRAFT: ${{ inputs.draft }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+        run: |
+          {
+            echo "### Release $VERSION"
+            echo
+            echo "- Commit: \`${GITHUB_SHA:0:8}\`"
+            echo "- Draft: \`$DRAFT\`"
+            echo
+            if [ "$DRAFT" = "true" ]; then
+              echo "Please [review and publish it](${RELEASE_URL/\/tags\//\/edit\/}) to promote the image to \`openops-mcp:$VERSION\` in the public registry."
+            else
+              echo "The Publish workflow is now promoting the image to \`openops-mcp:$VERSION\` in the public registry."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

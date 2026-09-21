@@ -8,7 +8,8 @@ name: Publish
 #                         per arch:  <sha>-<arch>, main-<sha>-<arch>, main-<arch>
 #                         manifest:  <sha>, main
 #   release published  -> the public registry (vars.ACR_PUBLIC_LOGIN_SERVER): <version>, latest
-#                         (version = tag without leading v; latest not moved by pre-releases)
+#                         (releases are cut by release.yml; version = tag without leading v;
+#                         latest not moved by pre-releases)
 #                         Not a rebuild: the release commit's image is imported from the
 #                         private registry, the same way the openops and tables release
 #                         flows promote a tested image. Releasing a commit therefore

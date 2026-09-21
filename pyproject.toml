@@ -4,6 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openops-mcp"
+# Informational only: the released version is the git tag (see the Release workflow).
 version = "0.2.0"
 description = "MCP server exposing OpenOps API operations as tools"
 requires-python = ">=3.14,<3.15"
