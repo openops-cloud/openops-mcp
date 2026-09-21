@@ -51,7 +51,7 @@ jobs:
             echo "::error::'$VERSION' is not a bare semantic version (no leading v)" >&2
             exit 1
           fi
-          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null; then
+          if git rev-parse --quiet --verify "refs/tags/$VERSION" >/dev/null; then
             echo "::error::Tag $VERSION already exists" >&2
             exit 1
           fi
@@ -110,7 +110,8 @@ jobs:
             echo "- Draft: \`$DRAFT\`"
             echo
             if [ "$DRAFT" = "true" ]; then
-              echo "Please [review and publish it](${RELEASE_URL/\/tags\//\/edit\/}) to promote the image to \`openops-mcp:$VERSION\` in the public registry."
+              edit_url="$(printf '%s' "$RELEASE_URL" | sed 's#/releases/tag/#/releases/edit/#')"
+              echo "Please [review and publish it]($edit_url) to promote the image to \`openops-mcp:$VERSION\` in the public registry."
             else
               echo "The Publish workflow is now promoting the image to \`openops-mcp:$VERSION\` in the public registry."
             fi
