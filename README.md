@@ -200,7 +200,8 @@ Resources → Network) and point `OPENOPS_API_URL` and `OPENOPS_MCP_ISSUER` at
 
 Published images (multi-arch, amd64 and arm64) come from the Publish workflow: releases go to
 `openops.azurecr.io/openops-mcp:<version>` (and `latest`), pullable anonymously; pushes to
-`main` go to the private `openopsprivate.azurecr.io/openops-mcp:main`.
+`main` go to the private `openopsprivate.azurecr.io/openops-mcp:main`. See
+[Releasing](#releasing) for how a release is cut.
 
 ## Configuration reference
 
@@ -287,3 +288,19 @@ provider against a mocked API and authorization server, so the authentication pa
 exercised rather than stubbed.
 
 [docs/architecture.md](docs/architecture.md) covers how the pieces fit together and why.
+
+## Releasing
+
+Releases are cut with the **Release** workflow, run from `main`:
+
+1. Wait for the Publish run of the commit you want to release, so its image exists in the
+   private registry.
+2. Run **Release**. Leave `version` blank for the next patch after the latest tag, or set it
+   to bump minor or major (with no tags yet, blank would mean `0.0.1`, so the first release
+   sets it explicitly). It checks the image is there, then creates the tag and a draft
+   GitHub release named after the version (no `v` prefix).
+3. Publish the draft. That triggers the promote job, which imports the image into
+   `openops.azurecr.io/openops-mcp:<version>` and moves `latest` unless the version has a
+   pre-release suffix.
+
+The `version` in `pyproject.toml` is informational; the released version is the git tag.
