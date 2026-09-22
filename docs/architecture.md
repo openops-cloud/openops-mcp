@@ -116,9 +116,9 @@ server's published keys, so no request costs a round trip:
 
 ```python
 JWTVerifier(
-    jwks_uri=f"{issuer}/v1/oauth/jwks.json",
-    issuer=issuer,
-    audience=resource_url,     # this server's canonical URI
+    jwks_uri=f"{api_url}/v1/oauth/jwks.json",  # OPENOPS_API_URL, the internal route
+    issuer=issuer,                              # OPENOPS_MCP_ISSUER, the public identity
+    audience=resource_url,                      # this server's canonical URI
     required_scopes=["mcp"],
 )
 ```
@@ -144,9 +144,11 @@ that doesn't exist. For the same reason an ingress must not rewrite the mount pa
 prefix makes the advertised resource and the actual audience diverge.
 
 `OPENOPS_MCP_ISSUER` and `OPENOPS_MCP_RESOURCE_URL` have to be `https` unless they name
-loopback. The first receives the client secret as HTTP Basic, and the second is the identity
-this server advertises. `OPENOPS_API_URL` is exempt, since tool calls stay inside the cluster
-and only the OAuth endpoints are public.
+loopback. Both are published to clients: the first through discovery and as the `iss` every
+token must carry, the second as the identity this server advertises. Neither is dialled. The
+signing keys and the token exchange come from `OPENOPS_API_URL`, the same internal route tool
+calls take, which is why that one is exempt and why a public URL of `http://localhost` (this
+container, from the inside) still authenticates.
 
 **Exchanging it.** The client's token is addressed to this server rather than the API, so it's
 never forwarded, following the MCP authorization spec's no-token-passthrough rule.
@@ -154,7 +156,7 @@ never forwarded, following the MCP authorization spec's no-token-passthrough rul
 back a separate API-audience token:
 
 ```
-POST {issuer}/v1/oauth/token
+POST {api_url}/v1/oauth/token          # OPENOPS_API_URL; the token's iss stays {issuer}
 Authorization: Basic base64(openops-mcp-rs:{client_secret})
 grant_type=urn:ietf:params:oauth:grant-type:token-exchange
 subject_token={the caller's token}

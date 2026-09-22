@@ -10,7 +10,8 @@ STDIO_ENV = {
 
 HTTP_ENV = {
     "MCP_TRANSPORT": "http",
-    "OPENOPS_API_URL": "https://app.example.com/api",
+    # The address this server reaches the API at, distinct from the public issuer.
+    "OPENOPS_API_URL": "http://openops-app/api",
     "OPENOPS_MCP_ISSUER": "https://app.example.com/api",
     "OPENOPS_MCP_RESOURCE_URL": "https://app.example.com/mcp",
     "OPENOPS_MCP_CLIENT_SECRET": "s" * 32,
@@ -50,12 +51,30 @@ class TestStdio:
 
 
 class TestHttp:
-    def test_builds_settings_and_derives_the_oauth_endpoints(self) -> None:
+    def test_builds_settings_and_derives_the_oauth_endpoints_from_the_api_url(self) -> None:
+        # The issuer is what tokens are checked against; the keys and the exchange come
+        # from the API over the same route tool calls take.
         settings = load_settings(HTTP_ENV)
 
         assert isinstance(settings, HttpSettings)
-        assert settings.jwks_uri == "https://app.example.com/api/v1/oauth/jwks.json"
-        assert settings.token_endpoint == "https://app.example.com/api/v1/oauth/token"
+        assert settings.issuer == "https://app.example.com/api"
+        assert settings.jwks_uri == "http://openops-app/api/v1/oauth/jwks.json"
+        assert settings.token_endpoint == "http://openops-app/api/v1/oauth/token"
+
+    def test_reaches_the_api_even_when_the_public_url_is_loopback(self) -> None:
+        # A compose install with OPS_PUBLIC_URL=http://localhost: inside this container
+        # localhost is this container, so the issuer must never be dialled.
+        settings = load_settings(
+            {
+                **HTTP_ENV,
+                "OPENOPS_MCP_ISSUER": "http://localhost/api",
+                "OPENOPS_MCP_RESOURCE_URL": "http://localhost/mcp",
+            }
+        )
+
+        assert isinstance(settings, HttpSettings)
+        assert settings.jwks_uri == "http://openops-app/api/v1/oauth/jwks.json"
+        assert settings.token_endpoint == "http://openops-app/api/v1/oauth/token"
 
     def test_defaults_the_bind_address(self) -> None:
         settings = load_settings(HTTP_ENV)
@@ -161,8 +180,9 @@ class TestTransportSecurity:
         "name", ["OPENOPS_MCP_ISSUER", "OPENOPS_MCP_RESOURCE_URL"]
     )
     def test_refuses_cleartext_to_a_remote_host(self, name: str) -> None:
-        # The client secret travels to the issuer as HTTP Basic, and the resource URL is
-        # advertised to clients. The API refuses this configuration too.
+        # Both are published to clients: the issuer in discovery metadata and as the `iss`
+        # every token must carry, the resource URL as this server's identity. The API
+        # refuses this configuration too.
         with pytest.raises(ConfigError, match="https"):
             load_settings({**HTTP_ENV, name: "http://app.example.com/elsewhere"})
 
@@ -181,7 +201,9 @@ class TestTransportSecurity:
         assert settings.issuer == issuer
 
     def test_still_allows_a_cleartext_api_url(self) -> None:
-        # Tool calls are pod-to-pod inside a cluster; only the OAuth endpoints are public.
+        # Tool calls, the key fetch and the token exchange are all pod-to-pod inside a
+        # cluster; only the identities above are public.
         settings = load_settings({**HTTP_ENV, "OPENOPS_API_URL": "http://openops-api:3000"})
 
         assert settings.common.api_url == "http://openops-api:3000"
+        assert settings.jwks_uri == "http://openops-api:3000/v1/oauth/jwks.json"

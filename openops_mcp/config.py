@@ -58,6 +58,8 @@ class StdioSettings:
 @dataclass(frozen=True)
 class HttpSettings:
     common: CommonSettings
+    # The authorization server's public identity: what the `iss` claim on every token
+    # must equal and what discovery metadata advertises. It is never dialled.
     issuer: str
     resource_url: str
     client_secret: str
@@ -65,13 +67,18 @@ class HttpSettings:
     port: int = DEFAULT_HTTP_PORT
     transport: Transport = "http"
 
+    # The OAuth endpoints live on the same API the tools call, so they are reached over
+    # the same internal route. Going through the public issuer instead fails wherever
+    # this container cannot reach its own public URL: with OPS_PUBLIC_URL=http://localhost
+    # that address is this container, and a private ingress or a network without hairpin
+    # NAT is no better.
     @property
     def jwks_uri(self) -> str:
-        return f"{self.issuer}/v1/oauth/jwks.json"
+        return f"{self.common.api_url}/v1/oauth/jwks.json"
 
     @property
     def token_endpoint(self) -> str:
-        return f"{self.issuer}/v1/oauth/token"
+        return f"{self.common.api_url}/v1/oauth/token"
 
 
 Settings = StdioSettings | HttpSettings
@@ -97,10 +104,10 @@ def _require_url(name: str, env: dict[str, str]) -> str:
 
 
 def _require_public_url(name: str, env: dict[str, str]) -> str:
-    """A URL that leaves the cluster, so cleartext is only acceptable to loopback.
+    """A URL published to clients, so cleartext is only acceptable to loopback.
 
-    The client secret travels to the issuer as HTTP Basic, and the resource URL is
-    advertised to clients as this server's identity. The API applies the same rule.
+    The issuer is what clients discover and what every token's `iss` must match, and the
+    resource URL is advertised as this server's identity. The API applies the same rule.
     """
     value = _require_url(name, env)
     parsed = urlparse(value)
