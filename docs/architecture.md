@@ -116,9 +116,9 @@ server's published keys, so no request costs a round trip:
 
 ```python
 JWTVerifier(
-    jwks_uri=f"{issuer}/v1/oauth/jwks.json",
-    issuer=issuer,
-    audience=resource_url,     # this server's canonical URI
+    jwks_uri=f"{api_url}/v1/oauth/jwks.json",  # OPENOPS_API_URL, the internal route
+    issuer=issuer,                              # OPENOPS_MCP_ISSUER, the public identity
+    audience=resource_url,                      # this server's canonical URI
     required_scopes=["mcp"],
 )
 ```
@@ -156,7 +156,7 @@ never forwarded, following the MCP authorization spec's no-token-passthrough rul
 back a separate API-audience token:
 
 ```
-POST {issuer}/v1/oauth/token
+POST {api_url}/v1/oauth/token          # OPENOPS_API_URL; the token's iss stays {issuer}
 Authorization: Basic base64(openops-mcp-rs:{client_secret})
 grant_type=urn:ietf:params:oauth:grant-type:token-exchange
 subject_token={the caller's token}
