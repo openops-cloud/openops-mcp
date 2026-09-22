@@ -1,9 +1,10 @@
 """HTTP authentication: verify the caller, then act as them against the API.
 
 Inbound tokens are verified locally against the authorization server's published keys,
-so no request costs a round trip to it. The verified token is then exchanged for a
-separate API-audience token, which is what reaches the API — the caller's own token
-never does.
+so no request costs a round trip to it. The keys are fetched from the API over its
+internal URL; the public issuer is only what the `iss` claim is checked against. The
+verified token is then exchanged for a separate API-audience token, which is what
+reaches the API — the caller's own token never does.
 """
 
 from __future__ import annotations

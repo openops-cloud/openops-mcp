@@ -167,10 +167,14 @@ The issuer has to match exactly, because it's compared against the `iss` claim o
 inbound token. The resource URL has to differ from the issuer; startup refuses otherwise,
 since equal audiences would let a token minted for one resource be accepted by the other.
 
-Both must use `https` unless they point at loopback. The client secret travels to the issuer
-as HTTP Basic and the resource URL is this server's advertised identity, so cleartext to a
-remote host is refused at startup. `OPENOPS_API_URL` is exempt, because tool calls are
-pod-to-pod inside a cluster.
+Both must use `https` unless they point at loopback. They are published to clients: the
+issuer through discovery and as the `iss` every token carries, the resource URL as this
+server's advertised identity, so cleartext to a remote host is refused at startup.
+
+The issuer is never dialled. The signing keys and the token exchange are fetched from
+`OPENOPS_API_URL`, the same internal route tool calls take, so it has to name the API
+instance the issuer stands for. That is also why `OPENOPS_API_URL` is exempt from the
+`https` rule: everything sent to it stays inside the cluster.
 
 ## Docker
 
@@ -193,10 +197,10 @@ docker run --rm -p 3020:3020 \
 defaults. The environment comes from `uv.lock` with the same `uv sync --frozen --no-dev` CI
 runs; the Dockerfile explains the rest of its choices inline.
 
-To test against an API on your machine, the issuer has to be `localhost`, and inside a
-container that's the container. Run with `--network host` (on Docker Desktop, enable it under
-Resources → Network) and point `OPENOPS_API_URL` and `OPENOPS_MCP_ISSUER` at
-`http://localhost:3000`.
+To test against an API on your machine, point `OPENOPS_API_URL` at where the container can
+reach it (`http://host.docker.internal:3000` on Docker Desktop) and keep `OPENOPS_MCP_ISSUER`
+at the public `http://localhost:3000` the API is configured with. The issuer is only compared
+against tokens, so it does not matter that `localhost` inside the container is the container.
 
 Published images (multi-arch, amd64 and arm64) come from the Publish workflow: releases go to
 `openops.azurecr.io/openops-mcp:<version>` (and `latest`), pullable anonymously; pushes to

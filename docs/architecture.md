@@ -144,9 +144,11 @@ that doesn't exist. For the same reason an ingress must not rewrite the mount pa
 prefix makes the advertised resource and the actual audience diverge.
 
 `OPENOPS_MCP_ISSUER` and `OPENOPS_MCP_RESOURCE_URL` have to be `https` unless they name
-loopback. The first receives the client secret as HTTP Basic, and the second is the identity
-this server advertises. `OPENOPS_API_URL` is exempt, since tool calls stay inside the cluster
-and only the OAuth endpoints are public.
+loopback. Both are published to clients: the first through discovery and as the `iss` every
+token must carry, the second as the identity this server advertises. Neither is dialled. The
+signing keys and the token exchange come from `OPENOPS_API_URL`, the same internal route tool
+calls take, which is why that one is exempt and why a public URL of `http://localhost` (this
+container, from the inside) still authenticates.
 
 **Exchanging it.** The client's token is addressed to this server rather than the API, so it's
 never forwarded, following the MCP authorization spec's no-token-passthrough rule.
